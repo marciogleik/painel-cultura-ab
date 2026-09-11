@@ -1,13 +1,33 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId, cloneElement, isValidElement, type ReactElement, type ReactNode, type AriaAttributes } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { supabase } from '@/lib/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { errorMessage, todayISO, formatDate } from '@/lib/utils'
 import {
   ClipboardList, CheckCircle2, ChevronRight, User,
   Phone, MapPin, Shield, AlertCircle, Printer, ArrowLeft,
   Calendar,
 } from 'lucide-react'
+
+interface WorkshopOption {
+  id: string
+  title: string
+  instructor: string | null
+  schedule: string | null
+  location: string | null
+  category: string | null
+}
+
+/** Imprime apenas a ficha (#print-area), sem esconder o restante da árvore do DOM. */
+const PRINT_CSS = `
+  @media print {
+    body * { visibility: hidden; }
+    #print-area, #print-area * { visibility: visible; }
+    #print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  }
+`
 
 interface EnrollmentFormData {
   // Dados da inscrição
@@ -27,7 +47,7 @@ interface EnrollmentFormData {
   // Dados do responsável
   guardian_name: string
   phone: string
-  work_phone: string
+  guardian_work_phone: string
   address: string
   // Autorização de busca
   accompanied_by_guardian: boolean
@@ -41,13 +61,14 @@ interface EnrollmentFormData {
 export function WorkshopEnrollmentPage() {
   const { id } = useParams<{ id?: string }>()
   const navigate = useNavigate()
+  const toast = useToast()
   const [step, setStep] = useState<'form' | 'success'>('form')
   const [submittedData, setSubmittedData] = useState<EnrollmentFormData | null>(null)
-  const [accompaniedValue, setAccompaniedValue] = useState<boolean | null>(null)
+  const [accompanied, setAccompanied] = useState(true)
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<EnrollmentFormData>({
     defaultValues: {
-      enrollment_date: new Date().toISOString().split('T')[0],
+      enrollment_date: todayISO(),
       accompanied_by_guardian: true,
       image_authorization: false,
     },
@@ -57,12 +78,13 @@ export function WorkshopEnrollmentPage() {
   const { data: workshops } = useQuery({
     queryKey: ['workshops_for_enrollment'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('cultural_workshops')
         .select('id, title, instructor, schedule, location, category')
         .eq('is_active', true)
         .order('title')
-      return data ?? []
+      if (error) throw error
+      return (data ?? []) as WorkshopOption[]
     },
   })
 
@@ -70,7 +92,7 @@ export function WorkshopEnrollmentPage() {
   const selectedWorkshopId = watch('workshop_id')
   useEffect(() => {
     if (id && workshops) {
-      const ws = workshops.find((w: any) => w.id === id)
+      const ws = workshops.find((w) => w.id === id)
       if (ws) {
         setValue('workshop_id', ws.id)
         setValue('workshop_name', ws.title)
@@ -84,7 +106,7 @@ export function WorkshopEnrollmentPage() {
   // Auto-preencher campos ao selecionar oficina
   useEffect(() => {
     if (selectedWorkshopId && workshops) {
-      const ws = workshops.find((w: any) => w.id === selectedWorkshopId)
+      const ws = workshops.find((w) => w.id === selectedWorkshopId)
       if (ws) {
         setValue('workshop_name', ws.title)
         setValue('instructor', ws.instructor ?? '')
@@ -100,16 +122,20 @@ export function WorkshopEnrollmentPage() {
         ...data,
         age: data.age ? parseInt(data.age, 10) : null,
         workshop_id: data.workshop_id || null,
-        accompanied_by_guardian: accompaniedValue ?? true,
+        accompanied_by_guardian: accompanied,
       }
       const { error } = await supabase.from('workshop_enrollments').insert(payload)
       if (error) throw error
       return payload
     },
     onSuccess: (_, variables) => {
-      setSubmittedData(variables)
+      setSubmittedData({ ...variables, accompanied_by_guardian: accompanied })
       setStep('success')
+      toast.success('Ficha de matrícula enviada com sucesso!')
       window.scrollTo({ top: 0, behavior: 'smooth' })
+    },
+    onError: (err: unknown) => {
+      toast.error(errorMessage(err, 'Erro ao enviar a ficha. Verifique os campos e tente novamente.'))
     },
   })
 
@@ -122,7 +148,7 @@ export function WorkshopEnrollmentPage() {
   })
 
   // ─── SUCCESS SCREEN ────────────────────────────────────────────────────────
-  if (step === 'success') {
+  if (step === 'success' && submittedData) {
     return (
       <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
         <div className="mx-auto max-w-2xl px-4 py-16">
@@ -144,13 +170,13 @@ export function WorkshopEnrollmentPage() {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <button onClick={() => window.print()}
+              <button type="button" onClick={() => window.print()}
                 className="btn btn-secondary gap-2">
-                <Printer size={16} /> Imprimir Ficha
+                <Printer size={16} aria-hidden="true" /> Imprimir Ficha
               </button>
-              <button onClick={() => navigate('/oficinas')}
+              <button type="button" onClick={() => navigate('/oficinas')}
                 className="btn btn-primary gap-2">
-                <ArrowLeft size={16} /> Voltar às Oficinas
+                <ArrowLeft size={16} aria-hidden="true" /> Voltar às Oficinas
               </button>
             </div>
           </div>
@@ -158,8 +184,9 @@ export function WorkshopEnrollmentPage() {
           {/* Printable version */}
           <div id="print-area" className="mt-8 rounded-2xl border p-8 print:block"
             style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-            <PrintableEnrollment data={submittedData!} workshops={workshops ?? []} today={today} />
+            <PrintableEnrollment data={submittedData} workshops={workshops ?? []} today={today} />
           </div>
+          <style>{PRINT_CSS}</style>
         </div>
       </div>
     )
@@ -172,6 +199,7 @@ export function WorkshopEnrollmentPage() {
       <div style={{ background: 'var(--bg-inst-header)', borderBottom: '3px solid var(--accent)' }}>
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-10">
           <button
+            type="button"
             onClick={() => navigate(-1)}
             className="flex items-center gap-1 text-sm mb-4 opacity-70 hover:opacity-100 transition-opacity"
             style={{ color: 'var(--text-inst-subtitle)' }}
@@ -193,9 +221,9 @@ export function WorkshopEnrollmentPage() {
       {/* Form */}
       <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-10">
         {mutation.isError && (
-          <div className="flex items-center gap-3 p-4 mb-6 rounded-xl border border-red-500/30 bg-red-500/10 text-red-600">
-            <AlertCircle size={18} />
-            <p className="text-sm">Erro ao enviar a ficha. Verifique os campos e tente novamente.</p>
+          <div role="alert" className="flex items-center gap-3 p-4 mb-6 rounded-xl border border-red-500/30 bg-red-500/10 text-red-600">
+            <AlertCircle size={18} aria-hidden="true" />
+            <p className="text-sm">{errorMessage(mutation.error, 'Erro ao enviar a ficha. Verifique os campos e tente novamente.')}</p>
           </div>
         )}
 
@@ -220,7 +248,7 @@ export function WorkshopEnrollmentPage() {
             <Field label="Oficina / Escolinha">
               <select {...register('workshop_id')} className="input">
                 <option value="">Selecione uma oficina ou preencha manualmente abaixo</option>
-                {workshops?.map((ws: any) => (
+                {workshops?.map((ws) => (
                   <option key={ws.id} value={ws.id}>{ws.title}</option>
                 ))}
               </select>
@@ -311,7 +339,7 @@ export function WorkshopEnrollmentPage() {
 
             <Field label="Telefone do Trabalho">
               <input
-                {...register('work_phone')}
+                {...register('guardian_work_phone')}
                 className="input"
                 placeholder="(xx) xxxxx-xxxx — para contato alternativo"
               />
@@ -328,33 +356,37 @@ export function WorkshopEnrollmentPage() {
 
           {/* ── SEÇÃO 4: AUTORIZAÇÃO DE BUSCA ── */}
           <Section icon={<MapPin size={18} />} title="Autorização de Busca">
-            <div className="space-y-3">
-              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 O aluno virá para a atividade e irá para casa acompanhado(a) de um responsável?
-              </p>
+              </legend>
               <div className="flex gap-6">
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label htmlFor="accompanied-yes" className="flex items-center gap-2 cursor-pointer">
                   <input
+                    id="accompanied-yes"
                     type="radio"
                     name="accompanied"
                     value="sim"
-                    onChange={() => { setAccompaniedValue(true); setValue('accompanied_by_guardian', true) }}
+                    checked={accompanied}
+                    onChange={() => setAccompanied(true)}
                     className="accent-amber-500 w-4 h-4"
                   />
-                  <span className="text-sm" style={{ color: 'var(--text-primary)' }}>( ) Sim</span>
+                  <span className="text-sm" style={{ color: 'var(--text-primary)' }}>Sim</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label htmlFor="accompanied-no" className="flex items-center gap-2 cursor-pointer">
                   <input
+                    id="accompanied-no"
                     type="radio"
                     name="accompanied"
                     value="nao"
-                    onChange={() => { setAccompaniedValue(false); setValue('accompanied_by_guardian', false) }}
+                    checked={!accompanied}
+                    onChange={() => setAccompanied(false)}
                     className="accent-amber-500 w-4 h-4"
                   />
-                  <span className="text-sm" style={{ color: 'var(--text-primary)' }}>( ) Não</span>
+                  <span className="text-sm" style={{ color: 'var(--text-primary)' }}>Não</span>
                 </label>
               </div>
-            </div>
+            </fieldset>
 
             <Field label="Nome da Pessoa Autorizada para Buscar a Criança/Adolescente">
               <input
@@ -500,14 +532,8 @@ export function WorkshopEnrollmentPage() {
         </form>
       </div>
 
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          body > * { display: none !important; }
-          #print-area { display: block !important; }
-          #print-area { position: fixed; top: 0; left: 0; width: 100%; }
-        }
-      `}</style>
+      {/* Estilos de impressão */}
+      <style>{PRINT_CSS}</style>
     </div>
   )
 }
@@ -517,9 +543,9 @@ export function WorkshopEnrollmentPage() {
 function Section({
   icon, title, children, accent,
 }: {
-  icon: React.ReactNode
+  icon: ReactNode
   title: string
-  children: React.ReactNode
+  children: ReactNode
   accent?: boolean
 }) {
   return (
@@ -531,7 +557,7 @@ function Section({
           borderColor: accent ? 'rgba(245,158,11,0.2)' : 'var(--border)',
         }}
       >
-        <span style={{ color: 'var(--accent)' }}>{icon}</span>
+        <span style={{ color: 'var(--accent)' }} aria-hidden="true">{icon}</span>
         <h2 className="font-semibold text-sm uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>
           {title}
         </h2>
@@ -543,21 +569,33 @@ function Section({
   )
 }
 
+type ControlProps = Pick<AriaAttributes, 'aria-invalid' | 'aria-describedby' | 'aria-required'> & { id?: string }
+
 function Field({
   label, required, error, children,
 }: {
   label: string
   required?: boolean
   error?: string
-  children: React.ReactNode
+  children: ReactElement<ControlProps>
 }) {
+  const id = useId()
+  const errorId = `${id}-error`
+  const control = isValidElement(children)
+    ? cloneElement(children, {
+        id,
+        'aria-invalid': error ? true : undefined,
+        'aria-describedby': error ? errorId : undefined,
+        'aria-required': required || undefined,
+      })
+    : children
   return (
     <div>
-      <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
-        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+      <label htmlFor={id} className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+        {label}{required && <span className="text-red-500 ml-0.5" aria-hidden="true">*</span>}
       </label>
-      {children}
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {control}
+      {error && <p id={errorId} role="alert" className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
   )
 }
@@ -568,7 +606,7 @@ function PrintableEnrollment({
   data, workshops, today,
 }: {
   data: EnrollmentFormData
-  workshops: any[]
+  workshops: WorkshopOption[]
   today: string
 }) {
   const ws = workshops.find(w => w.id === data.workshop_id)
@@ -588,7 +626,7 @@ function PrintableEnrollment({
       {/* Dados da inscrição */}
       <div className="mb-4">
         <p className="font-bold text-xs uppercase tracking-wider mb-2 border-b pb-1">Dados da Inscrição</p>
-        <PrintRow label="Data da Inscrição" value={data.enrollment_date ? new Date(data.enrollment_date + 'T00:00:00').toLocaleDateString('pt-BR') : ''} />
+        <PrintRow label="Data da Inscrição" value={formatDate(data.enrollment_date)} />
         <PrintRow label="Período" value={data.period} />
         <PrintRow label="Oficina / Escolinha" value={data.workshop_name ?? ws?.title} />
         <PrintRow label="Instrutor" value={data.instructor} />
@@ -612,7 +650,8 @@ function PrintableEnrollment({
       <div className="mb-4">
         <p className="font-bold text-xs uppercase tracking-wider mb-2 border-b pb-1">Dados do Responsável</p>
         <PrintRow label="Nome do Responsável" value={data.guardian_name} />
-        <PrintRow label="Telefone Residencial / Trabalho" value={data.phone} />
+        <PrintRow label="Telefone Residencial" value={data.phone} />
+        <PrintRow label="Telefone do Trabalho" value={data.guardian_work_phone} />
         <PrintRow label="Endereço Residencial / Trabalho" value={data.address} />
       </div>
 

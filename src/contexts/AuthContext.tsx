@@ -1,71 +1,122 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { Profile, UserRole } from '@/types'
+
+import { ADMIN_ROLES, STAFF_ROLES } from '@/lib/roles'
 
 interface AuthContextValue {
   user: User | null
   session: Session | null
   profile: Profile | null
   role: UserRole | null
+  /** Sessão ou perfil ainda carregando */
   isLoading: boolean
+  /** Sessão existe mas o perfil não pôde ser carregado */
+  profileError: string | null
+  /** SUPER_ADMIN, ADMIN_CULTURA ou GESTOR */
   isAdmin: boolean
-  isGestor: boolean
-  isArtista: boolean
+  /** isAdmin ou SERVIDOR */
+  isStaff: boolean
+  /** O usuário chegou por um link de recuperação de senha */
+  isPasswordRecovery: boolean
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string, fullName: string) => Promise<{ user: User | null; session: Session | null }>
   signOut: () => Promise<void>
   resetPassword: (email: string) => Promise<void>
+  updatePassword: (newPassword: string) => Promise<void>
+  refreshProfile: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
+  const [sessionLoading, setSessionLoading] = useState(true)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
 
-  const ADMIN_ROLES: UserRole[] = ['SUPER_ADMIN', 'ADMIN_CULTURA']
-  const GESTOR_ROLES: UserRole[] = ['SUPER_ADMIN', 'ADMIN_CULTURA', 'GESTOR']
+  const user = session?.user ?? null
+  const userId = user?.id ?? null
 
-  async function loadProfile(userId: string) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    if (data) setProfile(data as Profile)
-  }
-
+  // Sessão: estado inicial + mudanças. Nada assíncrono do Supabase dentro do callback
+  // (o cliente recomenda evitar await em onAuthStateChange para não travar o refresh).
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) loadProfile(session.user.id)
-      setIsLoading(false)
+    let active = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return
+      setSession(data.session)
+      setSessionLoading(false)
     })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        loadProfile(session.user.id)
-      } else {
-        setProfile(null)
-      }
-      setIsLoading(false)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+      setSession(newSession)
+      setSessionLoading(false)
+      if (event === 'PASSWORD_RECOVERY') setIsPasswordRecovery(true)
+      if (event === 'SIGNED_OUT') setIsPasswordRecovery(false)
     })
-
-    return () => subscription.unsubscribe()
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
   }, [])
 
-  async function signIn(email: string, password: string) {
+  const loadProfile = useCallback(async (id: string) => {
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle()
+    if (error) throw error
+    return (data as Profile) ?? null
+  }, [])
+
+  // Perfil: carregado sempre que o usuário muda; isLoading só cai a false depois disso.
+  useEffect(() => {
+    if (!userId) {
+      setProfile(null)
+      setProfileError(null)
+      setProfileLoading(false)
+      return
+    }
+    let cancelled = false
+    setProfileLoading(true)
+    setProfileError(null)
+    loadProfile(userId)
+      .then((p) => {
+        if (cancelled) return
+        if (!p) {
+          setProfileError('Perfil não encontrado para esta conta.')
+          setProfile(null)
+        } else if (!p.is_active) {
+          setProfileError('Esta conta está desativada. Procure a Secretaria de Cultura.')
+          setProfile(p)
+        } else {
+          setProfile(p)
+        }
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setProfileError(err.message || 'Não foi possível carregar seu perfil.')
+        setProfile(null)
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [userId, loadProfile])
+
+  const refreshProfile = useCallback(async () => {
+    if (!userId) return
+    const p = await loadProfile(userId)
+    setProfile(p)
+  }, [userId, loadProfile])
+
+  const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
-  }
+  }, [])
 
-  async function signUp(email: string, password: string, fullName: string) {
+  const signUp = useCallback(async (email: string, password: string, fullName: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -76,44 +127,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
     if (error) throw error
     return data
-  }
+  }, [])
 
-  async function signOut() {
+  const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
-  }
+  }, [])
 
-  async function resetPassword(email: string) {
+  const resetPassword = useCallback(async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     })
     if (error) throw error
-  }
+  }, [])
 
-  const role = profile?.role ?? null
+  const updatePassword = useCallback(async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) throw error
+    setIsPasswordRecovery(false)
+  }, [])
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        session,
-        profile,
-        role,
-        isLoading,
-        isAdmin: role !== null && ADMIN_ROLES.includes(role),
-        isGestor: role !== null && GESTOR_ROLES.includes(role),
-        isArtista: role === 'ARTISTA',
-        signIn,
-        signUp,
-        signOut,
-        resetPassword,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  )
+  const role = profile && profile.is_active ? profile.role : null
+
+  const value = useMemo<AuthContextValue>(() => ({
+    user,
+    session,
+    profile,
+    role,
+    isLoading: sessionLoading || profileLoading,
+    profileError,
+    isAdmin: role !== null && ADMIN_ROLES.includes(role),
+    isStaff: role !== null && STAFF_ROLES.includes(role),
+    isPasswordRecovery,
+    signIn,
+    signUp,
+    signOut,
+    resetPassword,
+    updatePassword,
+    refreshProfile,
+  }), [user, session, profile, role, sessionLoading, profileLoading, profileError, isPasswordRecovery,
+      signIn, signUp, signOut, resetPassword, updatePassword, refreshProfile])
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')

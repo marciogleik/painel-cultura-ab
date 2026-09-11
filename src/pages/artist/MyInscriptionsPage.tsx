@@ -1,98 +1,92 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { useAuth } from '@/contexts/AuthContext'
-import { getMyArtistProfile } from '@/services/artistService'
+import { FileText, ArrowRight, UserRound } from 'lucide-react'
+import { useMyAgents } from '@/hooks/useMyAgent'
 import { getMyInscriptions } from '@/services/editalService'
-import { FileText, Clock, CheckCircle, XCircle, ArrowRight, AlertCircle } from 'lucide-react'
-import { formatDate } from '@/lib/utils'
-import type { InscriptionStatus } from '@/types'
-
-const statusConfig: Record<InscriptionStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  ABERTO: { label: 'Enviada', color: 'badge-blue', icon: <FileText size={12} /> },
-  EM_ANALISE: { label: 'Em análise', color: 'badge-amber', icon: <Clock size={12} /> },
-  APROVADO: { label: 'Aprovada', color: 'badge-green', icon: <CheckCircle size={12} /> },
-  REPROVADO: { label: 'Reprovada', color: 'badge-red', icon: <XCircle size={12} /> },
-  FINALIZADO: { label: 'Finalizado', color: 'badge-slate', icon: <AlertCircle size={12} /> },
-}
+import { formatDate, formatDateTime } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonList } from '@/components/ui/Spinner'
+import { inscriptionStatusInfo } from './inscriptionStatus'
 
 export function MyInscriptionsPage() {
-  const { user } = useAuth()
+  const { agents, isLoading: agentsLoading, error: agentsError, refetch: refetchAgents } = useMyAgents()
+  const agentIds = agents.map((a) => a.id)
 
-  const { data: artist } = useQuery({
-    queryKey: ['my-artist', user?.id],
-    queryFn: () => getMyArtistProfile(user!.id),
-    enabled: !!user,
+  const inscriptionsQuery = useQuery({
+    queryKey: ['my-inscriptions', agentIds],
+    queryFn: () => getMyInscriptions(agentIds),
+    enabled: !agentsLoading && agentIds.length > 0,
   })
 
-  const { data: inscriptions, isLoading } = useQuery({
-    queryKey: ['my-inscriptions', artist?.id],
-    queryFn: () => getMyInscriptions(artist!.id),
-    enabled: !!artist,
-  })
+  const isLoading = agentsLoading || (agentIds.length > 0 && inscriptionsQuery.isLoading)
+  const inscriptions = inscriptionsQuery.data ?? []
+  const showAgentName = agents.length > 1
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Minhas Inscrições</h1>
-        <Link to="/editais" className="btn btn-primary text-sm">
-          <FileText className="h-4 w-4" />
-          Ver editais abertos
-        </Link>
-      </div>
+      <PageHeader
+        icon={FileText}
+        title="Minhas inscrições"
+        description="Acompanhe o andamento das suas inscrições em editais e concursos."
+        actions={
+          <Link to="/editais" className="btn btn-primary text-sm">
+            <FileText className="h-4 w-4" />
+            Ver editais abertos
+          </Link>
+        }
+      />
 
-      {!artist ? (
-        <div className="card p-12 text-center">
-          <FileText className="mx-auto h-12 w-12 mb-4" style={{ color: 'var(--text-muted)' }} />
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Cadastre seu Agente Cultural</h2>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-            Você precisa cadastrar seu Agente Cultural no SMIIC para se inscrever em editais.
-          </p>
-          <Link to="/painel/agentes/cadastrar" className="btn btn-primary">Cadastrar Agente Cultural</Link>
-        </div>
-      ) : isLoading ? (
-        <div className="space-y-4">
-          {[1, 2].map(i => (
-            <div key={i} className="card p-5">
-              <div className="skeleton h-5 w-2/3 mb-3" />
-              <div className="skeleton h-4 w-1/3" />
-            </div>
-          ))}
-        </div>
-      ) : inscriptions?.length === 0 ? (
-        <div className="card p-12 text-center">
-          <FileText className="mx-auto h-12 w-12 mb-4" style={{ color: 'var(--text-muted)' }} />
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Nenhuma inscrição ainda</h2>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-            Encontre editais culturais abertos e faça sua inscrição.
-          </p>
-          <Link to="/editais" className="btn btn-primary">Ver editais disponíveis</Link>
-        </div>
+      {isLoading ? (
+        <SkeletonList rows={3} />
+      ) : agentsError ? (
+        <ErrorState error={agentsError} onRetry={() => refetchAgents()} />
+      ) : inscriptionsQuery.isError ? (
+        <ErrorState error={inscriptionsQuery.error} onRetry={() => inscriptionsQuery.refetch()} />
+      ) : agents.length === 0 ? (
+        <EmptyState
+          icon={UserRound}
+          title="Cadastre seu Agente Cultural"
+          description="Você precisa cadastrar seu Agente Cultural no SMIIC e ter o cadastro aprovado para se inscrever em editais."
+          action={<Link to="/painel/agentes/cadastrar" className="btn btn-primary">Cadastrar Agente Cultural</Link>}
+        />
+      ) : inscriptions.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="Nenhuma inscrição ainda"
+          description="Encontre editais culturais abertos e faça sua inscrição."
+          action={<Link to="/editais" className="btn btn-primary">Ver editais disponíveis</Link>}
+        />
       ) : (
-        <div className="space-y-4">
-          {inscriptions?.map((inscription) => {
-            const edital = (inscription as any).editais
-            const statusInfo = statusConfig[inscription.status]
+        <ul className="space-y-4">
+          {inscriptions.map((inscription) => {
+            const edital = inscription.editais
+            const status = inscriptionStatusInfo(inscription.status)
             return (
-              <div key={inscription.id} className="card p-5">
-                <div className="flex items-start justify-between gap-4">
+              <li key={inscription.id} className="card p-5">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className={`badge ${statusInfo.color} text-xs flex items-center gap-1`}>
-                        {statusInfo.icon}
-                        {statusInfo.label}
-                      </span>
+                      <span className={`badge ${status.badge} text-xs`} title={status.description}>{status.label}</span>
                       {edital?.categories && (
                         <span className="badge badge-slate text-xs">
                           {edital.categories.icon} {edital.categories.name}
                         </span>
                       )}
+                      {showAgentName && inscription.cultural_agents?.display_name && (
+                        <span className="badge badge-slate text-xs inline-flex items-center gap-1">
+                          <UserRound size={11} aria-hidden="true" />
+                          {inscription.cultural_agents.display_name}
+                        </span>
+                      )}
                     </div>
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
+                    <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
                       {edital?.title ?? 'Edital'}
                     </h3>
                     <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      Inscrito em {formatDate(inscription.submitted_at)}
-                      {inscription.reviewed_at && ` · Revisado em ${formatDate(inscription.reviewed_at)}`}
+                      Inscrição enviada em {formatDateTime(inscription.submitted_at)}
+                      {inscription.reviewed_at && ` · Analisada em ${formatDateTime(inscription.reviewed_at)}`}
+                      {edital?.end_date && ` · Prazo do edital: ${formatDate(edital.end_date)}`}
                     </p>
                     {inscription.reviewer_notes && (
                       <div className="mt-2 p-3 rounded-lg text-sm" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
@@ -103,18 +97,15 @@ export function MyInscriptionsPage() {
                       </div>
                     )}
                   </div>
-                  <Link
-                    to={`/editais/${inscription.edital_id}`}
-                    className="btn btn-ghost text-xs flex-shrink-0"
-                  >
+                  <Link to={`/editais/${inscription.edital_id}`} className="btn btn-ghost text-xs flex-shrink-0">
                     Ver edital
                     <ArrowRight className="h-3 w-3" />
                   </Link>
                 </div>
-              </div>
+              </li>
             )
           })}
-        </div>
+        </ul>
       )}
     </div>
   )

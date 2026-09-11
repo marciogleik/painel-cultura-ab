@@ -1,161 +1,101 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, ChevronDown, Check, Plus, X, ListTree, SlidersHorizontal } from 'lucide-react'
-import { useState, useMemo } from 'react'
-import { getTypologyTree } from '@/services/culturalAgentService'
+import { Check, ChevronDown, ChevronRight, List, ListTree, Plus, RefreshCw, X } from 'lucide-react'
+import { getTypologyTree, flattenTypologyTree } from '@/services/culturalAgentService'
+import { OFFICIAL_SMIIC_TYPOLOGIES } from '@/data/smiicTypologies'
+import { LoadingButton } from '@/components/ui/ConfirmDialog'
+import { Field } from './Field'
 import type { CulturalTypology } from '@/types'
 import type { WizardStep3 } from './useAgentWizard'
 
 interface Step3Props {
   data: WizardStep3
   onChange: (values: Partial<WizardStep3>) => void
-  onNext: () => void
+  /** Recebe a lista final de tipologias (já limpa) para o pai salvar sem closure velha */
+  onNext: (typologyIds: string[]) => void
   onBack: () => void
+  errors: Record<string, string>
+  setErrors: (errors: Record<string, string>) => void
+  isSaving: boolean
 }
 
-function TypologyNode({
-  node,
-  selectedIds,
-  onToggle,
-  depth,
-}: {
-  node: CulturalTypology
-  selectedIds: Set<string>
-  onToggle: (id: string) => void
-  depth: number
-}) {
-  const [expanded, setExpanded] = useState(depth < 1)
-  const hasChildren = (node.children?.length ?? 0) > 0
-  const isSelected = selectedIds.has(node.id)
+type Mode = 'lists' | 'tree'
 
-  return (
-    <div>
-      <div
-        className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors duration-150 ${
-          isSelected ? 'bg-amber-500/10' : 'hover:bg-slate-100 dark:hover:bg-slate-800/40'
-        }`}
-        style={{ paddingLeft: `${12 + depth * 20}px` }}
-      >
-        {/* Expand toggle */}
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }}
-            className="flex-shrink-0 p-0.5 rounded"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </button>
-        ) : (
-          <span className="w-5 flex-shrink-0" />
-        )}
+const activeChildren = (node: CulturalTypology | undefined | null) =>
+  (node?.children ?? []).filter((c) => c.is_active !== false)
 
-        {/* Checkbox */}
-        <button
-          type="button"
-          onClick={() => onToggle(node.id)}
-          className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors duration-150 ${
-            isSelected ? 'border-amber-500 bg-amber-500' : 'border-slate-400'
-          }`}
-        >
-          {isSelected && <Check size={10} strokeWidth={3} className="text-slate-900" />}
-        </button>
-
-        {/* Label */}
-        <span
-          onClick={() => onToggle(node.id)}
-          className="text-sm flex-1"
-          style={{
-            color: isSelected ? 'var(--accent)' : 'var(--text-primary)',
-            fontWeight: depth === 0 ? 600 : depth === 1 ? 500 : 400,
-          }}
-        >
-          {node.name}
-        </span>
-
-        {/* Level badge */}
-        {depth === 0 && (
-          <span className="badge badge-amber text-xs hidden sm:inline-flex">
-            Área
-          </span>
-        )}
-      </div>
-
-      {/* Children */}
-      {hasChildren && expanded && (
-        <div>
-          {node.children!.map((child) => (
-            <TypologyNode
-              key={child.id}
-              node={child}
-              selectedIds={selectedIds}
-              onToggle={onToggle}
-              depth={depth + 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-export function Step3Tipologia({ data, onChange, onNext, onBack }: Step3Props) {
-  const { data: tree, isLoading } = useQuery({
-    queryKey: ['typology-tree-agent'],
+export function Step3Tipologia({ data, onChange, onNext, onBack, errors, setErrors, isSaving }: Step3Props) {
+  const {
+    data: tree = OFFICIAL_SMIIC_TYPOLOGIES,
+    isPending,
+    isFetching,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['typology-tree', 'agent'],
     queryFn: () => getTypologyTree('agent'),
-    staleTime: 1000 * 60 * 10,
+    // A lista oficial embutida aparece na hora; o banco atualiza em segundo plano.
+    placeholderData: OFFICIAL_SMIIC_TYPOLOGIES,
+    staleTime: 10 * 60_000,
   })
 
-  const [mode, setMode] = useState<'dropdown' | 'tree'>('dropdown')
-  const [selectedTip1, setSelectedTip1] = useState<string>('')
-  const [selectedTip2, setSelectedTip2] = useState<string>('')
+  const roots = useMemo(() => tree.filter((r) => r.is_active !== false), [tree])
+  const flat = useMemo(() => flattenTypologyTree(roots), [roots])
 
-  const selectedIds = useMemo(() => new Set(data.typology_ids), [data.typology_ids])
+  const [mode, setMode] = useState<Mode>('lists')
 
-  // Lookup map: id -> { typology, parentName }
-  const typologyMap = useMemo(() => {
-    const map = new Map<string, { item: CulturalTypology; parentName?: string }>()
-    tree?.forEach((root) => {
-      map.set(root.id, { item: root })
-      root.children?.forEach((child) => {
-        map.set(child.id, { item: child, parentName: root.name })
-      })
+  // Tipologia 1 › 2 › 3 (modo listas) — os rascunhos vivem no estado do wizard
+  const level1 = roots.find((r) => r.id === data.draftTip1)
+  const level2Options = activeChildren(level1)
+  const level2 = level2Options.find((c) => c.id === data.draftTip2)
+  const level3Options = activeChildren(level2)
+  const level3 = level3Options.find((c) => c.id === data.draftTip3)
+
+  /** Só nós de nível ≥ 2 contam como tipologia escolhida (a macroárea sozinha não classifica). */
+  const selectedIds = data.typology_ids.filter((id) => (flat.get(id)?.node.level ?? 1) >= 2)
+  const selected = new Set(selectedIds)
+
+  const setIds = (ids: string[], extra: Partial<WizardStep3> = {}) => {
+    onChange({ typology_ids: ids, ...extra })
+  }
+
+  const addId = (id: string) => {
+    if (selected.has(id)) return
+    setIds([...selectedIds, id])
+  }
+
+  const removeId = (id: string) => {
+    setIds(selectedIds.filter((x) => x !== id))
+  }
+
+  const toggleId = (id: string) => (selected.has(id) ? removeId(id) : addId(id))
+
+  const pendingLeaf = level3 ?? level2 ?? null
+  const canAdd = !!pendingLeaf && !selected.has(pendingLeaf.id)
+
+  const handleAddFromLists = () => {
+    if (!pendingLeaf) return
+    setIds(selected.has(pendingLeaf.id) ? selectedIds : [...selectedIds, pendingLeaf.id], {
+      draftTip1: '',
+      draftTip2: '',
+      draftTip3: '',
     })
-    return map
-  }, [tree])
+  }
 
-  // Subcategorias disponíveis para a Tipologia 1 selecionada
-  const tipologia2Options = useMemo(() => {
-    if (!selectedTip1 || !tree) return []
-    const root = tree.find((r) => r.id === selectedTip1)
-    return root?.children ?? []
-  }, [selectedTip1, tree])
-
-  const toggleId = (id: string) => {
-    const next = new Set(selectedIds)
-    if (next.has(id)) {
-      next.delete(id)
-    } else {
-      next.add(id)
+  const handleNext = () => {
+    // Macroárea sem subnível selecionada nas listas e nada adicionado ainda
+    if (selectedIds.length === 0 && data.draftTip1 && !pendingLeaf) {
+      setErrors({ typology: 'Escolha também a Tipologia 2 (e a 3, quando houver) — a macroárea sozinha não classifica o agente.' })
+      return
     }
-    onChange({ typology_ids: Array.from(next) })
+    // Havia uma escolha completa nas listas que o usuário esqueceu de adicionar: adiciona por ele.
+    const finalIds = pendingLeaf && !selected.has(pendingLeaf.id) ? [...selectedIds, pendingLeaf.id] : selectedIds
+    setIds(finalIds, { draftTip1: '', draftTip2: '', draftTip3: '' })
+    setErrors({})
+    onNext(finalIds)
   }
 
-  const handleAddFromDropdown = () => {
-    if (!selectedTip2) return
-    if (!selectedIds.has(selectedTip2)) {
-      const next = new Set(selectedIds)
-      next.add(selectedTip2)
-      // Se a Tipologia 1 raiz também for relevante, podemos adicioná-la ou manter a Tipologia 2
-      onChange({ typology_ids: Array.from(next) })
-    }
-    setSelectedTip2('')
-  }
-
-  const handleRemove = (id: string) => {
-    const next = new Set(selectedIds)
-    next.delete(id)
-    onChange({ typology_ids: Array.from(next) })
-  }
+  const pathLabel = (id: string) => flat.get(id)?.path.join(' › ') ?? id
 
   return (
     <div className="animate-fade-in">
@@ -164,199 +104,248 @@ export function Step3Tipologia({ data, onChange, onNext, onBack }: Step3Props) {
           Tipologia cultural
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Selecione a Tipologia 1 (Macroárea) e a Tipologia 2 (Atuação específica) conforme o padrão oficial do SMIIC.
+          Classifique sua atuação em até três níveis, conforme o padrão oficial do SMIIC
+          (ex.: Demais Agentes Culturais › Músico › Compositor). Você pode adicionar mais de uma tipologia.
         </p>
       </div>
 
-      {/* Seletor de Modo (Dropdowns SMIIC vs Árvore Completa) */}
-      <div className="flex items-center justify-between mb-4 pb-2 border-b" style={{ borderColor: 'var(--border)' }}>
-        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-          Modo de seleção
-        </span>
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs">
-          <button
-            type="button"
-            onClick={() => setMode('dropdown')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
-              mode === 'dropdown'
-                ? 'bg-white dark:bg-slate-700 text-amber-500 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <SlidersHorizontal size={13} />
-            Seleção Rápida (SMIIC)
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('tree')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
-              mode === 'tree'
-                ? 'bg-white dark:bg-slate-700 text-amber-500 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <ListTree size={13} />
-            Árvore Completa
+      {/* Estado da lista oficial */}
+      {isPending && (
+        <p className="text-xs mb-3 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }} aria-live="polite">
+          <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+          Carregando a lista oficial de tipologias…
+        </p>
+      )}
+      {isError && (
+        <div
+          role="alert"
+          className="mb-3 px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-3"
+          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: 'var(--text-secondary)' }}
+        >
+          <span>Não foi possível atualizar a lista do servidor. Usando a lista oficial embutida.</span>
+          <button type="button" className="btn btn-secondary text-xs py-1 px-2" onClick={() => refetch()} disabled={isFetching}>
+            Tentar de novo
           </button>
         </div>
+      )}
+
+      {/* Alternador de modo */}
+      <div className="flex items-center gap-1 mb-4 p-1 rounded-lg w-fit" style={{ background: 'var(--bg-secondary)' }} role="tablist" aria-label="Modo de seleção">
+        {([
+          { value: 'lists', label: 'Listas', icon: List },
+          { value: 'tree', label: 'Árvore completa', icon: ListTree },
+        ] as { value: Mode; label: string; icon: typeof List }[]).map(({ value, label, icon: Icon }) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={mode === value}
+            onClick={() => setMode(value)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+            style={{
+              background: mode === value ? 'var(--bg-card)' : 'transparent',
+              color: mode === value ? 'var(--accent)' : 'var(--text-muted)',
+              boxShadow: mode === value ? '0 1px 2px rgba(0,0,0,0.12)' : 'none',
+            }}
+          >
+            <Icon size={13} aria-hidden="true" />
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* MODO 1: DROPDOWNS OFICIAIS SMIIC */}
-      {mode === 'dropdown' && (
-        <div className="card p-5 mb-5 space-y-4" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-          {/* Tipologia 1 */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              Tipologia 1:
-            </label>
+      {mode === 'lists' ? (
+        <div className="card p-5 sm:p-6 mb-5 space-y-4">
+          <Field label="Tipologia 1 (macroárea)" required>
             <select
-              value={selectedTip1}
-              onChange={(e) => {
-                setSelectedTip1(e.target.value)
-                setSelectedTip2('')
-              }}
-              className="input w-full font-medium"
+              className="input font-medium text-sm py-2.5 cursor-pointer"
+              value={data.draftTip1}
+              onChange={(e) => onChange({ draftTip1: e.target.value, draftTip2: '', draftTip3: '' })}
             >
-              <option value="">✓ Selecione a Tipologia 1...</option>
-              {tree?.map((root) => (
-                <option key={root.id} value={root.id}>
-                  {root.name} ({root.children?.length ?? 0})
-                </option>
+              <option value="">Selecione…</option>
+              {roots.map((root) => (
+                <option key={root.id} value={root.id}>{root.name}</option>
               ))}
             </select>
-          </div>
+          </Field>
 
-          {/* Tipologia 2 */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              Tipologia 2:
-            </label>
-            <div className="flex gap-2">
+          <Field
+            label="Tipologia 2"
+            required
+            hint={!data.draftTip1 ? 'Escolha primeiro a Tipologia 1.' : level2Options.length === 0 ? 'Esta macroárea não possui subníveis.' : undefined}
+          >
+            <select
+              className="input font-medium text-sm py-2.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              value={data.draftTip2}
+              disabled={!data.draftTip1 || level2Options.length === 0}
+              onChange={(e) => onChange({ draftTip2: e.target.value, draftTip3: '' })}
+            >
+              <option value="">Selecione…</option>
+              {level2Options.map((child) => (
+                <option key={child.id} value={child.id}>{child.name}</option>
+              ))}
+            </select>
+          </Field>
+
+          {level3Options.length > 0 && (
+            <Field label="Tipologia 3" hint="Detalhe a atuação, se quiser. Se não escolher, vale a Tipologia 2.">
               <select
-                value={selectedTip2}
-                onChange={(e) => setSelectedTip2(e.target.value)}
-                disabled={!selectedTip1 || tipologia2Options.length === 0}
-                className="input flex-1 font-medium disabled:opacity-50"
+                className="input font-medium text-sm py-2.5 cursor-pointer"
+                value={data.draftTip3}
+                onChange={(e) => onChange({ draftTip3: e.target.value })}
               >
-                <option value="">
-                  {!selectedTip1
-                    ? 'Selecione primeiro a Tipologia 1 acima'
-                    : '✓ Selecione a Tipologia 2...'}
-                </option>
-                {tipologia2Options.map((child) => (
-                  <option key={child.id} value={child.id}>
-                    {child.name}
-                  </option>
+                <option value="">Selecione…</option>
+                {level3Options.map((child) => (
+                  <option key={child.id} value={child.id}>{child.name}</option>
                 ))}
               </select>
-              <button
-                type="button"
-                onClick={handleAddFromDropdown}
-                disabled={!selectedTip2}
-                className="btn btn-primary flex-shrink-0 flex items-center gap-1.5 px-4"
-              >
-                <Plus size={16} />
-                Adicionar
-              </button>
-            </div>
-            {selectedTip1 && tipologia2Options.length > 0 && (
-              <p className="text-xs mt-1.5" style={{ color: 'var(--text-muted)' }}>
-                {tipologia2Options.length} categorias disponíveis para esta área.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MODO 2: ÁRVORE HIERÁRQUICA COMPLETA */}
-      {mode === 'tree' && (
-        <div className="card p-2 mb-5 max-h-[50vh] overflow-y-auto">
-          {isLoading ? (
-            <div className="space-y-2 p-3">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="skeleton h-8 rounded" />
-              ))}
-            </div>
-          ) : (
-            tree?.map((root) => (
-              <TypologyNode
-                key={root.id}
-                node={root}
-                selectedIds={selectedIds}
-                onToggle={toggleId}
-                depth={0}
-              />
-            ))
+            </Field>
           )}
-        </div>
-      )}
 
-      {/* LISTA DE TIPOLOGIAS SELECIONADAS */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            Tipologias Selecionadas ({selectedIds.size})
-          </span>
-          {selectedIds.size > 0 && (
+          <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }} aria-live="polite">
+              {pendingLeaf
+                ? <>Pronto para adicionar: <strong style={{ color: 'var(--text-primary)' }}>{pathLabel(pendingLeaf.id)}</strong></>
+                : data.draftTip1
+                ? 'Agora escolha a Tipologia 2.'
+                : 'Escolha a macroárea para começar.'}
+            </p>
             <button
               type="button"
-              onClick={() => onChange({ typology_ids: [] })}
-              className="text-xs text-red-500 hover:underline"
+              onClick={handleAddFromLists}
+              disabled={!canAdd}
+              className="btn btn-primary text-xs py-1.5 px-3"
             >
-              Limpar todas
+              <Plus size={14} aria-hidden="true" />
+              Adicionar tipologia
             </button>
-          )}
+          </div>
         </div>
+      ) : (
+        <div className="card p-3 sm:p-4 mb-5 max-h-[26rem] overflow-y-auto">
+          <p className="text-xs mb-2 px-1" style={{ color: 'var(--text-muted)' }}>
+            Abra as macroáreas e marque uma ou mais tipologias. Só os subníveis podem ser marcados.
+          </p>
+          <ul className="list-none p-0 m-0 space-y-0.5" role="tree" aria-label="Árvore de tipologias">
+            {roots.map((root) => (
+              <TreeNode key={root.id} node={root} depth={0} selected={selected} onToggle={toggleId} />
+            ))}
+          </ul>
+        </div>
+      )}
 
-        {selectedIds.size === 0 ? (
-          <div className="p-4 rounded-xl border border-dashed text-center text-xs" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
-            Nenhuma tipologia adicionada ainda. Escolha no seletor acima para adicionar.
-          </div>
+      {/* Tipologias escolhidas */}
+      <div className="mb-5">
+        <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+          Tipologias escolhidas {selectedIds.length > 0 && `(${selectedIds.length})`}
+        </p>
+        {selectedIds.length === 0 ? (
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Nenhuma tipologia adicionada ainda.</p>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            {Array.from(selectedIds).map((id) => {
-              const info = typologyMap.get(id)
-              return (
-                <div
-                  key={id}
-                  className="inline-flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-xl border text-xs font-semibold animate-scale-in"
-                  style={{
-                    background: 'rgba(245, 158, 11, 0.08)',
-                    borderColor: 'rgba(245, 158, 11, 0.3)',
-                    color: 'var(--text-primary)',
-                  }}
+          <ul className="list-none p-0 m-0 flex flex-wrap gap-2" aria-label="Tipologias escolhidas">
+            {selectedIds.map((id) => (
+              <li
+                key={id}
+                className="inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-full text-xs font-medium"
+                style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: 'var(--text-primary)' }}
+              >
+                <Check size={12} style={{ color: 'var(--accent)' }} aria-hidden="true" />
+                <span>{pathLabel(id)}</span>
+                <button
+                  type="button"
+                  onClick={() => removeId(id)}
+                  className="w-5 h-5 rounded-full flex items-center justify-center hover:bg-black/10 dark:hover:bg-white/10"
+                  aria-label={`Remover ${pathLabel(id)}`}
                 >
-                  <div className="flex flex-col">
-                    <span>{info?.item.name ?? id}</span>
-                    {info?.parentName && (
-                      <span className="text-[10px] font-normal" style={{ color: 'var(--text-muted)' }}>
-                        {info.parentName}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemove(id)}
-                    className="p-1 rounded-full hover:bg-red-500/20 text-slate-400 hover:text-red-500 transition-colors"
-                    title="Remover tipologia"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              )
-            })}
-          </div>
+                  <X size={11} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {errors.typology && (
+          <p role="alert" className="mt-2 text-xs" style={{ color: 'var(--error)' }}>{errors.typology}</p>
         )}
       </div>
 
       <div className="flex gap-3">
-        <button type="button" onClick={onBack} className="btn btn-secondary flex-1">
+        <button type="button" onClick={onBack} disabled={isSaving} className="btn btn-secondary flex-1">
           Voltar
         </button>
-        <button type="button" onClick={onNext} className="btn btn-primary flex-2">
-          {selectedIds.size === 0 ? 'Pular por enquanto' : 'Continuar'}
-        </button>
+        <LoadingButton type="button" onClick={handleNext} loading={isSaving} className="btn btn-primary flex-2">
+          {selectedIds.length === 0 && !pendingLeaf ? 'Pular por enquanto' : 'Continuar'}
+        </LoadingButton>
       </div>
     </div>
+  )
+}
+
+function TreeNode({
+  node,
+  depth,
+  selected,
+  onToggle,
+}: {
+  node: CulturalTypology
+  depth: number
+  selected: Set<string>
+  onToggle: (id: string) => void
+}) {
+  const children = activeChildren(node)
+  const hasChildren = children.length > 0
+  const [open, setOpen] = useState(false)
+  const selectable = node.level >= 2
+  const isSelected = selected.has(node.id)
+
+  return (
+    <li role="treeitem" aria-expanded={hasChildren ? open : undefined} aria-selected={selectable ? isSelected : undefined}>
+      <div
+        className="flex items-center gap-1 rounded-lg px-1 py-0.5"
+        style={{ paddingLeft: `${depth * 16 + 4}px`, background: isSelected ? 'rgba(245,158,11,0.08)' : undefined }}
+      >
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-black/5 dark:hover:bg-white/5 flex-shrink-0"
+            aria-label={`${open ? 'Recolher' : 'Expandir'} ${node.name}`}
+            aria-expanded={open}
+          >
+            {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+          </button>
+        ) : (
+          <span className="w-6 h-6 flex-shrink-0" aria-hidden="true" />
+        )}
+
+        {selectable ? (
+          <label className="flex items-center gap-2 text-sm py-1 cursor-pointer flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>
+            <input
+              type="checkbox"
+              className="w-4 h-4 rounded accent-amber-500 flex-shrink-0"
+              checked={isSelected}
+              onChange={() => onToggle(node.id)}
+            />
+            <span className="truncate">{node.name}</span>
+          </label>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="text-sm font-semibold py-1 text-left flex-1 min-w-0 truncate"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {node.name}
+          </button>
+        )}
+      </div>
+
+      {hasChildren && open && (
+        <ul className="list-none p-0 m-0" role="group">
+          {children.map((child) => (
+            <TreeNode key={child.id} node={child} depth={depth + 1} selected={selected} onToggle={onToggle} />
+          ))}
+        </ul>
+      )}
+    </li>
   )
 }

@@ -1,30 +1,39 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { LogIn } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { Eye, EyeOff, LogIn } from 'lucide-react'
+import { AuthLayout } from '@/components/auth/AuthLayout'
+import { PasswordInput } from '@/components/auth/PasswordInput'
+import { LoadingButton } from '@/components/ui/ConfirmDialog'
+import { errorMessage } from '@/lib/utils'
 
 const schema = z.object({
   email: z.string().email('E-mail inválido'),
-  password: z.string().min(6, 'Mínimo de 6 caracteres'),
+  password: z.string().min(8, 'Mínimo de 8 caracteres'),
 })
 
 type FormData = z.infer<typeof schema>
 
+interface LocationState {
+  from?: { pathname?: string; search?: string }
+}
+
 export function LoginPage() {
-  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const { user, signIn } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = (location.state as any)?.from?.pathname ?? '/painel'
+
+  const state = location.state as LocationState | null
+  const from = state?.from?.pathname
+    ? `${state.from.pathname}${state.from.search ?? ''}`
+    : '/painel'
 
   useEffect(() => {
-    if (user) {
-      navigate(from, { replace: true })
-    }
+    if (user) navigate(from, { replace: true })
   }, [user, from, navigate])
 
   const {
@@ -38,130 +47,75 @@ export function LoginPage() {
       setError('')
       await signIn(data.email, data.password)
       navigate(from, { replace: true })
-    } catch (err: any) {
-      const msg = (err?.message ?? '').toLowerCase()
+    } catch (err) {
+      const msg = errorMessage(err, '').toLowerCase()
       if (msg.includes('email not confirmed')) {
         setError('Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada e a pasta de spam.')
       } else if (msg.includes('invalid login credentials') || msg.includes('invalid credentials')) {
-        setError('E-mail ou senha incorretos. Se você já tem conta e não lembra a senha, clique em "Esqueci minha senha" abaixo.')
+        setError('E-mail ou senha incorretos. Se você já tem conta e não lembra a senha, use "Esqueci minha senha".')
       } else {
-        setError(err?.message ?? 'Erro ao entrar na plataforma. Verifique seus dados.')
+        setError(errorMessage(err, 'Erro ao entrar na plataforma. Verifique seus dados.'))
       }
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--bg-primary)' }}>
-      {/* Background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 -right-40 h-96 w-96 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, #f59e0b, transparent)' }} />
-        <div className="absolute bottom-1/4 -left-40 h-96 w-96 rounded-full opacity-5"
-          style={{ background: 'radial-gradient(circle, #3b82f6, transparent)' }} />
-      </div>
+    <AuthLayout title="Entrar na plataforma">
+      {error && (
+        <div role="alert" className="mb-4 p-3 rounded-lg text-sm text-red-400 border border-red-500/20 bg-red-500/5">
+          {error}
+        </div>
+      )}
 
-      <div className="relative w-full max-w-sm animate-slide-up">
-        <div className="text-center mb-8">
-          <Link to="/" className="inline-flex flex-col items-center gap-3">
-            <img
-              src="/logo-secretaria.jpg"
-              alt="Secretaria de Esporte, Cultura, Lazer e Eventos - Prefeitura de Água Boa"
-              className="h-20 w-auto object-contain"
-            />
-            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: '#f5a623' }}>
-              Plataforma Municipal de Cultura
-            </p>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <div>
+          <label htmlFor="login-email" className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+            E-mail
+          </label>
+          <input
+            id="login-email"
+            type="email"
+            {...register('email')}
+            className={`input ${errors.email ? 'input-error' : ''}`}
+            placeholder="seu@email.com"
+            autoComplete="email"
+            aria-invalid={!!errors.email || undefined}
+          />
+          {errors.email && <p role="alert" className="mt-1 text-xs text-red-400">{errors.email.message}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="login-password" className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+            Senha
+          </label>
+          <PasswordInput
+            id="login-password"
+            {...register('password')}
+            invalid={!!errors.password}
+            placeholder="••••••••"
+            autoComplete="current-password"
+          />
+          {errors.password && <p role="alert" className="mt-1 text-xs text-red-400">{errors.password.message}</p>}
+        </div>
+
+        <div className="flex justify-end">
+          <Link to="/esqueci-senha" className="text-xs hover:text-amber-400 transition-colors" style={{ color: 'var(--text-muted)' }}>
+            Esqueci minha senha
           </Link>
         </div>
 
-        {/* Card */}
-        <div className="card p-8">
-          <h1 className="text-xl font-bold mb-6 text-center" style={{ color: 'var(--text-primary)' }}>Entrar na plataforma</h1>
+        <LoadingButton type="submit" loading={isSubmitting} className="btn btn-primary w-full justify-center py-2.5">
+          {!isSubmitting && <LogIn className="h-4 w-4" />}
+          {isSubmitting ? 'Entrando...' : 'Entrar'}
+        </LoadingButton>
+      </form>
 
-          {error && (
-            <div className="mb-4 p-3 rounded-lg text-sm text-red-400 border border-red-500/20 bg-red-500/5">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                E-mail
-              </label>
-              <input
-                type="email"
-                {...register('email')}
-                className={`input ${errors.email ? 'input-error' : ''}`}
-                placeholder="seu@email.com"
-                autoComplete="email"
-              />
-              {errors.email && (
-                <p className="mt-1 text-xs text-red-400">{errors.email.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                Senha
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  {...register('password')}
-                  className={`input pr-10 ${errors.password ? 'input-error' : ''}`}
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-900 dark:text-white transition-colors"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="mt-1 text-xs text-red-400">{errors.password.message}</p>
-              )}
-            </div>
-
-            <div className="flex justify-end">
-              <Link
-                to="/esqueci-senha"
-                className="text-xs hover:text-amber-400 transition-colors"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                Esqueci minha senha
-              </Link>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="btn btn-primary w-full justify-center py-2.5"
-            >
-              {isSubmitting ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : (
-                <LogIn className="h-4 w-4" />
-              )}
-              {isSubmitting ? 'Entrando...' : 'Entrar'}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
-            Não tem conta?{' '}
-            <Link to="/cadastro" className="font-medium text-amber-400 hover:text-amber-300 transition-colors">
-              Cadastre-se gratuitamente
-            </Link>
-          </p>
-        </div>
-
-        <p className="mt-6 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          Sistema seguro — Prefeitura Municipal de Água Boa
-        </p>
-      </div>
-    </div>
+      <p className="mt-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
+        Não tem conta?{' '}
+        <Link to="/cadastro" className="font-medium text-amber-400 hover:text-amber-300 transition-colors">
+          Cadastre-se gratuitamente
+        </Link>
+      </p>
+    </AuthLayout>
   )
 }

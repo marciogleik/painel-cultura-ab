@@ -1,133 +1,202 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-import { GraduationCap, Plus, Pencil, Trash2, X } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { GraduationCap, Plus } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { useCrud } from '@/hooks/useCrud'
+import { formatDate } from '@/lib/utils'
+import { Modal } from '@/components/ui/Modal'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonList } from '@/components/ui/Spinner'
+import { AdminTable, BoolBadge, RowActions, type AdminColumn } from '@/components/admin/AdminTable'
+import { Field, CheckboxField, FormFooter } from '@/components/admin/Field'
 import { ImageUploader } from '@/components/ImageUploader'
 
+type ProjectStatus = 'planejamento' | 'em_andamento' | 'concluido' | 'suspenso'
+
+interface CulturalProject {
+  id: string
+  title: string
+  description: string | null
+  status: ProjectStatus
+  cover_url: string | null
+  start_date: string | null
+  end_date: string | null
+  coordinator: string | null
+  contact: string | null
+  website: string | null
+  partners: string | null
+  is_public: boolean
+  created_at: string
+}
+
+interface ProjectForm {
+  title: string
+  status: ProjectStatus
+  description: string
+  start_date: string
+  end_date: string
+  coordinator: string
+  contact: string
+  website: string
+  partners: string
+  cover_url: string
+  is_public: boolean
+}
+
+const STATUS_LABELS: Record<ProjectStatus, string> = {
+  planejamento: 'Planejamento',
+  em_andamento: 'Em andamento',
+  concluido: 'Concluído',
+  suspenso: 'Suspenso',
+}
+
+const STATUS_BADGE: Record<ProjectStatus, string> = {
+  planejamento: 'badge-blue',
+  em_andamento: 'badge-amber',
+  concluido: 'badge-green',
+  suspenso: 'badge-red',
+}
+
+const DEFAULTS: ProjectForm = {
+  title: '', status: 'planejamento', description: '', start_date: '', end_date: '',
+  coordinator: '', contact: '', website: '', partners: '', cover_url: '', is_public: true,
+}
+
+function toForm(p: CulturalProject): ProjectForm {
+  return {
+    title: p.title ?? '',
+    status: p.status ?? 'planejamento',
+    description: p.description ?? '',
+    start_date: p.start_date ?? '',
+    end_date: p.end_date ?? '',
+    coordinator: p.coordinator ?? '',
+    contact: p.contact ?? '',
+    website: p.website ?? '',
+    partners: p.partners ?? '',
+    cover_url: p.cover_url ?? '',
+    is_public: p.is_public ?? true,
+  }
+}
+
 export function AdminProjects() {
-  const qc = useQueryClient()
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [coverUrl, setCoverUrl] = useState<string>('')
-  const { register, handleSubmit, reset } = useForm()
+  const { isAdmin } = useAuth()
+  const confirm = useConfirm()
+  const formId = useId()
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<CulturalProject | null>(null)
 
-  const { data: items, isLoading } = useQuery({
-    queryKey: ['cultural_projects'],
-    queryFn: async () => {
-      const { data } = await supabase.from('cultural_projects').select('*').order('created_at', { ascending: false })
-      return data ?? []
-    },
+  const crud = useCrud<CulturalProject>({
+    table: 'cultural_projects',
+    orderBy: ['created_at', false],
+    invalidate: [['cultural_projects']],
   })
 
-  const mutation = useMutation({
-    mutationFn: async (data: any) => {
-      const payload = { ...data, cover_url: coverUrl || null }
-      if (editing) {
-        await supabase.from('cultural_projects').update(payload).eq('id', editing.id)
-      } else {
-        await supabase.from('cultural_projects').insert(payload)
-      }
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cultural_projects'] }); setModalOpen(false); setEditing(null); setCoverUrl(''); reset() },
-  })
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<ProjectForm>({ defaultValues: DEFAULTS })
+  const coverUrl = watch('cover_url')
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => { await supabase.from('cultural_projects').delete().eq('id', id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cultural_projects'] }),
-  })
+  function openNew() { setEditing(null); reset(DEFAULTS); setOpen(true) }
+  function openEdit(item: CulturalProject) { setEditing(item); reset(toForm(item)); setOpen(true) }
+  function close() { setOpen(false) }
 
-  const STATUS_LABELS: Record<string, string> = {
-    em_andamento: 'Em Andamento', concluido: 'Concluído', planejamento: 'Planejamento', suspenso: 'Suspenso',
+  function onSubmit(values: ProjectForm) {
+    crud.save.mutate({ id: editing?.id, ...values }, { onSuccess: close })
   }
 
-  function openEdit(item: any) { setEditing(item); reset(item); setCoverUrl(item.cover_url ?? ''); setModalOpen(true) }
-  function openNew() { setEditing(null); reset({}); setCoverUrl(''); setModalOpen(true) }
+  async function onDelete(item: CulturalProject) {
+    const ok = await confirm({ title: `Excluir "${item.title}"?`, message: 'O projeto será removido do site. Esta ação não pode ser desfeita.', danger: true, confirmLabel: 'Excluir' })
+    if (ok) crud.remove.mutate(item.id)
+  }
+
+  const columns: AdminColumn<CulturalProject>[] = [
+    { key: 'title', header: 'Título', render: (p) => <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{p.title}</span> },
+    { key: 'status', header: 'Status', render: (p) => <span className={`badge text-xs ${STATUS_BADGE[p.status] ?? 'badge-slate'}`}>{STATUS_LABELS[p.status] ?? p.status}</span> },
+    { key: 'period', header: 'Período', render: (p) => (p.start_date || p.end_date ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}` : '—') },
+    { key: 'coordinator', header: 'Coordenação', render: (p) => p.coordinator ?? '—' },
+    { key: 'public', header: 'Público', render: (p) => <BoolBadge value={p.is_public} /> },
+    { key: 'actions', header: <span className="sr-only">Ações</span>, align: 'right', render: (p) => <RowActions canWrite={isAdmin} onEdit={() => openEdit(p)} onDelete={() => onDelete(p)} /> },
+  ]
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Projetos Culturais</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Gerenciar projetos culturais do município</p>
-        </div>
-        <button onClick={openNew} className="btn btn-primary"><Plus size={16} /> Novo</button>
-      </div>
+      <PageHeader
+        icon={GraduationCap}
+        title="Projetos Culturais"
+        description="Projetos e programas culturais mantidos ou apoiados pelo município."
+        actions={isAdmin && <button type="button" onClick={openNew} className="btn btn-primary"><Plus size={16} /> Novo projeto</button>}
+      />
 
-      {isLoading ? (
-        <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} />)}</div>
-      ) : items && items.length > 0 ? (
-        <div className="rounded-2xl border overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-          <table className="w-full">
-            <thead style={{ background: 'var(--bg-secondary)' }}>
-              <tr>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Título</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Status</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              {items.map((item: any) => (
-                <tr key={item.id} style={{ background: 'var(--bg-card)' }}>
-                  <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{item.title}</td>
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{STATUS_LABELS[item.status] ?? item.status}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <button onClick={() => openEdit(item)} className="p-1.5 rounded text-amber-600 hover:bg-amber-50"><Pencil size={14} /></button>
-                      <button onClick={() => { if (confirm('Excluir?')) deleteMutation.mutate(item.id) }} className="p-1.5 rounded text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {crud.isLoading ? (
+        <SkeletonList rows={5} />
+      ) : crud.error ? (
+        <ErrorState error={crud.error} onRetry={() => crud.refetch()} />
+      ) : crud.items.length === 0 ? (
+        <EmptyState icon={GraduationCap} title="Nenhum projeto cadastrado" description="Cadastre projetos para que apareçam no site." action={isAdmin && <button type="button" onClick={openNew} className="btn btn-primary"><Plus size={16} /> Novo projeto</button>} />
       ) : (
-        <div className="text-center py-16 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
-          <GraduationCap size={40} className="mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
-          <p style={{ color: 'var(--text-primary)' }}>Nenhum projeto cadastrado</p>
-        </div>
+        <AdminTable columns={columns} rows={crud.items} caption="Lista de projetos culturais" />
       )}
 
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{editing ? 'Editar' : 'Novo'} Projeto</h2>
-              <button onClick={() => setModalOpen(false)} className="p-2 rounded-lg" style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
-            </div>
-            <form onSubmit={handleSubmit(data => mutation.mutate(data))} className="space-y-4">
-              <div><label className="label">Título *</label><input {...register('title', { required: true })} className="input w-full" /></div>
-              <div>
-                <label className="label">Status</label>
-                <select {...register('status')} className="input w-full">
-                  <option value="planejamento">Planejamento</option>
-                  <option value="em_andamento">Em Andamento</option>
-                  <option value="concluido">Concluído</option>
-                  <option value="suspenso">Suspenso</option>
+      <Modal
+        open={open}
+        onClose={close}
+        title={editing ? 'Editar projeto' : 'Novo projeto'}
+        locked={crud.save.isPending}
+        footer={<FormFooter formId={formId} onCancel={close} loading={crud.save.isPending} canWrite={isAdmin} />}
+      >
+        <form id={formId} onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          <fieldset disabled={!isAdmin} className="space-y-4 min-w-0">
+            <Field label="Título" required error={errors.title?.message}>
+              {(p) => <input {...p} {...register('title', { required: 'Informe o título do projeto.' })} className="input w-full" />}
+            </Field>
+            <Field label="Status">
+              {(p) => (
+                <select {...p} {...register('status')} className="input w-full">
+                  {(Object.keys(STATUS_LABELS) as ProjectStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
                 </select>
-              </div>
-              <div><label className="label">Descrição</label><textarea {...register('description')} className="input w-full" rows={3} /></div>
-              <div><label className="label">Coordenador</label><input {...register('coordinator')} className="input w-full" /></div>
-              <div><label className="label">Contato</label><input {...register('contact')} className="input w-full" /></div>
-              <div><label className="label">Parceiros</label><input {...register('partners')} className="input w-full" /></div>
-              <div>
-                <label className="label">Foto de Capa</label>
-                <ImageUploader
-                  currentUrl={editing?.cover_url}
-                  onUpload={url => setCoverUrl(url)}
-                  folder="projects"
-                  maxMb={10}
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setModalOpen(false)} className="btn btn-secondary flex-1">Cancelar</button>
-                <button type="submit" disabled={mutation.isPending} className="btn btn-primary flex-1">{mutation.isPending ? 'Salvando...' : 'Salvar'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+              )}
+            </Field>
+            <Field label="Descrição">
+              {(p) => <textarea {...p} {...register('description')} className="input w-full" rows={3} />}
+            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Início">
+                {(p) => <input {...p} {...register('start_date')} type="date" className="input w-full" />}
+              </Field>
+              <Field label="Término" error={errors.end_date?.message}>
+                {(p) => (
+                  <input
+                    {...p}
+                    {...register('end_date', { validate: (v, all) => !v || !all.start_date || v >= all.start_date || 'O término deve ser depois do início.' })}
+                    type="date"
+                    className="input w-full"
+                  />
+                )}
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Coordenação">
+                {(p) => <input {...p} {...register('coordinator')} className="input w-full" />}
+              </Field>
+              <Field label="Contato">
+                {(p) => <input {...p} {...register('contact')} className="input w-full" placeholder="Telefone ou e-mail" />}
+              </Field>
+            </div>
+            <Field label="Parceiros">
+              {(p) => <input {...p} {...register('partners')} className="input w-full" placeholder="Instituições e apoiadores" />}
+            </Field>
+            <Field label="Site">
+              {(p) => <input {...p} {...register('website')} type="url" className="input w-full" placeholder="https://" />}
+            </Field>
+            <div>
+              <p className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Foto de capa</p>
+              <input type="hidden" {...register('cover_url')} />
+              <ImageUploader label="Foto de capa" currentUrl={coverUrl || null} folder="projects" onUpload={(url) => setValue('cover_url', url, { shouldDirty: true })} />
+            </div>
+            <CheckboxField label="Projeto público" hint="Projetos não públicos ficam visíveis apenas no painel." {...register('is_public')} />
+          </fieldset>
+        </form>
+      </Modal>
     </div>
   )
 }

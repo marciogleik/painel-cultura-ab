@@ -95,6 +95,9 @@
   }
   .card:hover {
     border-color: var(--border-light);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+  .dark .card:hover {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   }
   .card-glow:hover {
@@ -191,30 +194,105 @@
     font-size: 0.75rem;
     font-weight: 500;
   }
+  /* Tema claro: texto escuro sobre fundo tingido (contraste AA) */
   .badge-amber {
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fde68a;
+  }
+  .badge-green {
+    background: #d1fae5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+  }
+  .badge-red {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+  }
+  .badge-blue {
+    background: #dbeafe;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+  }
+  .badge-slate {
+    background: #e2e8f0;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+  }
+  /* Tema escuro: texto claro sobre fundo translúcido */
+  .dark .badge-amber {
     background: rgba(245, 158, 11, 0.15);
     color: var(--accent-light);
     border: 1px solid rgba(245, 158, 11, 0.2);
   }
-  .badge-green {
+  .dark .badge-green {
     background: rgba(16, 185, 129, 0.15);
     color: #34d399;
     border: 1px solid rgba(16, 185, 129, 0.2);
   }
-  .badge-red {
+  .dark .badge-red {
     background: rgba(239, 68, 68, 0.15);
     color: #f87171;
     border: 1px solid rgba(239, 68, 68, 0.2);
   }
-  .badge-blue {
+  .dark .badge-blue {
     background: rgba(59, 130, 246, 0.15);
     color: #60a5fa;
     border: 1px solid rgba(59, 130, 246, 0.2);
   }
-  .badge-slate {
+  .dark .badge-slate {
     background: rgba(100, 116, 139, 0.15);
     color: #94a3b8;
     border: 1px solid rgba(100, 116, 139, 0.2);
+  }
+
+  /* Conteúdo HTML vindo do CMS (símbolos, textos institucionais) */
+  .rich-text {
+    color: var(--text-primary);
+    font-size: 0.9375rem;
+    line-height: 1.7;
+  }
+  .rich-text > * + * {
+    margin-top: 0.75em;
+  }
+  .rich-text h1,
+  .rich-text h2,
+  .rich-text h3,
+  .rich-text h4 {
+    font-weight: 700;
+    line-height: 1.3;
+    margin-top: 1.25em;
+  }
+  .rich-text h1 { font-size: 1.5rem; }
+  .rich-text h2 { font-size: 1.25rem; }
+  .rich-text h3 { font-size: 1.125rem; }
+  .rich-text h4 { font-size: 1rem; }
+  .rich-text p {
+    color: var(--text-secondary);
+  }
+  .rich-text ul,
+  .rich-text ol {
+    padding-left: 1.5rem;
+    color: var(--text-secondary);
+  }
+  .rich-text ul { list-style: disc; }
+  .rich-text ol { list-style: decimal; }
+  .rich-text li + li { margin-top: 0.25em; }
+  .rich-text a {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .rich-text strong { color: var(--text-primary); }
+  .rich-text blockquote {
+    border-left: 3px solid var(--accent);
+    padding-left: 1rem;
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+  .rich-text img {
+    max-width: 100%;
+    border-radius: 8px;
   }
 
   /* Gradient text */

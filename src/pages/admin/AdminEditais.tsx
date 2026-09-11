@@ -1,15 +1,30 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-import { FileText, Plus, Calendar, Pencil, Trash2, X, Send, ChevronDown, Download } from 'lucide-react'
-import { formatDate } from '@/lib/utils'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useQuery } from '@tanstack/react-query'
+import { FileText, Plus, Calendar, Send, Download } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
+import { useCrud } from '@/hooks/useCrud'
+import { formatDate } from '@/lib/utils'
+import type { Category, Edital, EditalStatus } from '@/types'
+import { Modal } from '@/components/ui/Modal'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonList } from '@/components/ui/Spinner'
+import { IconButton, RowActions } from '@/components/admin/AdminTable'
+import { Field, FormFooter } from '@/components/admin/Field'
+import { asNumberOrNull } from '@/components/admin/formRules'
 import { ImageUploader } from '@/components/ImageUploader'
 import { FileUploader } from '@/components/FileUploader'
 
-type EditalStatus = 'RASCUNHO' | 'PUBLICADO' | 'ENCERRADO' | 'CANCELADO'
+interface EditalRow extends Omit<Edital, 'categories' | 'profiles'> {
+  cover_url: string | null
+  document_url: string | null
+  categories?: Pick<Category, 'name' | 'icon'>
+}
 
-interface EditalFormData {
+interface EditalForm {
   title: string
   description: string
   requirements: string
@@ -17,483 +32,229 @@ interface EditalFormData {
   status: EditalStatus
   start_date: string
   end_date: string
-  total_slots: number | ''
-  prize_value: number | ''
+  total_slots: number | null
+  prize_value: number | null
+  cover_url: string
+  document_url: string
 }
 
-const STATUS_COLORS: Record<string, string> = {
+const STATUS_BADGE: Record<EditalStatus, string> = {
   RASCUNHO: 'badge-slate',
   PUBLICADO: 'badge-green',
   ENCERRADO: 'badge-amber',
   CANCELADO: 'badge-red',
 }
 
-const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS: Record<EditalStatus, string> = {
   RASCUNHO: 'Rascunho',
   PUBLICADO: 'Publicado',
   ENCERRADO: 'Encerrado',
   CANCELADO: 'Cancelado',
 }
 
+const DEFAULTS: EditalForm = {
+  title: '', description: '', requirements: '', category_id: '', status: 'RASCUNHO',
+  start_date: '', end_date: '', total_slots: null, prize_value: null, cover_url: '', document_url: '',
+}
+
+function toForm(e: EditalRow): EditalForm {
+  return {
+    title: e.title ?? '',
+    description: e.description ?? '',
+    requirements: e.requirements ?? '',
+    category_id: e.category_id ?? '',
+    status: e.status ?? 'RASCUNHO',
+    start_date: e.start_date ?? '',
+    end_date: e.end_date ?? '',
+    total_slots: e.total_slots,
+    prize_value: e.prize_value,
+    cover_url: e.cover_url ?? '',
+    document_url: e.document_url ?? '',
+  }
+}
+
 export function AdminEditais() {
-  const qc = useQueryClient()
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [coverUrl, setCoverUrl] = useState<string>('')
-  const [documentUrl, setDocumentUrl] = useState<string>('')
+  const { isAdmin, user } = useAuth()
+  const confirm = useConfirm()
+  const formId = useId()
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<EditalRow | null>(null)
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm<EditalFormData>()
-
-  // ── Queries ──────────────────────────────────────────────────────────────
-  const { data: editais, isLoading } = useQuery({
+  const crud = useCrud<EditalRow>({
+    table: 'editais',
     queryKey: ['admin-editais'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('editais')
-        .select('*, categories(name, icon), profiles(full_name)')
-        .order('created_at', { ascending: false })
-      return data ?? []
-    },
+    select: '*, categories(name, icon)',
+    orderBy: ['created_at', false],
+    invalidate: [['editais-public'], ['open-editais-count'], ['edital']],
+    omitOnSave: ['categories'],
   })
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('categories')
-        .select('id, name, icon')
-        .eq('is_active', true)
-        .order('sort_order')
-      return data ?? []
-    },
-  })
-
-  // ── Mutations ─────────────────────────────────────────────────────────────
-  const saveMutation = useMutation({
-    mutationFn: async (formData: EditalFormData) => {
-      const payload = {
-        ...formData,
-        total_slots: formData.total_slots === '' ? null : Number(formData.total_slots),
-        prize_value: formData.prize_value === '' ? null : Number(formData.prize_value),
-        category_id: formData.category_id || null,
-        cover_url: coverUrl || null,
-        document_url: documentUrl || null,
-        published_at:
-          formData.status === 'PUBLICADO' && (!editing || editing.status !== 'PUBLICADO')
-            ? new Date().toISOString()
-            : editing?.published_at ?? null,
-      }
-
-      if (editing) {
-        const { error } = await supabase.from('editais').update(payload).eq('id', editing.id)
-        if (error) throw error
-      } else {
-        const { error } = await supabase.from('editais').insert(payload)
-        if (error) throw error
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin-editais'] })
-      closeModal()
-    },
-    onError: (err: any) => {
-      setErrorMsg(err?.message ?? 'Erro ao salvar edital.')
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('editais').delete().eq('id', id)
+      const { data, error } = await supabase.from('categories').select('id, name, icon').eq('is_active', true).order('sort_order')
       if (error) throw error
+      return (data ?? []) as Pick<Category, 'id' | 'name' | 'icon'>[]
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-editais'] }),
-    onError: (err: any) => alert('Erro ao excluir: ' + (err?.message ?? 'Tente novamente.')),
   })
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  function openNew() {
-    setEditing(null)
-    setCoverUrl('')
-    setDocumentUrl('')
-    reset({
-      title: '',
-      description: '',
-      requirements: '',
-      category_id: '',
-      status: 'RASCUNHO',
-      start_date: '',
-      end_date: '',
-      total_slots: '',
-      prize_value: '',
-    })
-    setErrorMsg(null)
-    setModalOpen(true)
-  }
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<EditalForm>({ defaultValues: DEFAULTS })
+  const coverUrl = watch('cover_url')
+  const documentUrl = watch('document_url')
 
-  function openEdit(edital: any) {
-    setEditing(edital)
-    setCoverUrl(edital.cover_url ?? '')
-    setDocumentUrl(edital.document_url ?? '')
-    reset({
-      title: edital.title ?? '',
-      description: edital.description ?? '',
-      requirements: edital.requirements ?? '',
-      category_id: edital.category_id ?? '',
-      status: edital.status ?? 'RASCUNHO',
-      start_date: edital.start_date ?? '',
-      end_date: edital.end_date ?? '',
-      total_slots: edital.total_slots ?? '',
-      prize_value: edital.prize_value ?? '',
-    })
-    setErrorMsg(null)
-    setModalOpen(true)
-  }
+  function openNew() { setEditing(null); reset(DEFAULTS); setOpen(true) }
+  function openEdit(item: EditalRow) { setEditing(item); reset(toForm(item)); setOpen(true) }
+  function close() { setOpen(false) }
 
-  function closeModal() {
-    setModalOpen(false)
-    setEditing(null)
-    setErrorMsg(null)
-    setCoverUrl('')
-    setDocumentUrl('')
-    reset()
-  }
-
-  function confirmDelete(edital: any) {
-    if (confirm(`Excluir o edital "${edital.title}"? Esta ação não pode ser desfeita.`)) {
-      deleteMutation.mutate(edital.id)
+  /** published_by/published_at só são gravados na transição para PUBLICADO. */
+  function publicationFields(nextStatus: EditalStatus, current: EditalRow | null) {
+    if (nextStatus === 'PUBLICADO' && current?.status !== 'PUBLICADO') {
+      return { published_by: user?.id ?? null, published_at: new Date().toISOString() }
     }
+    return {}
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  function onSubmit(values: EditalForm) {
+    crud.save.mutate({ id: editing?.id, ...values, ...publicationFields(values.status, editing) }, { onSuccess: close })
+  }
+
+  async function onPublish(item: EditalRow) {
+    const ok = await confirm({
+      title: `Publicar "${item.title}"?`,
+      message: 'O edital ficará visível no site e aberto a inscrições dentro do período informado.',
+      confirmLabel: 'Publicar',
+    })
+    if (ok) crud.save.mutate({ id: item.id, status: 'PUBLICADO', ...publicationFields('PUBLICADO', item) })
+  }
+
+  async function onDelete(item: EditalRow) {
+    const ok = await confirm({ title: `Excluir "${item.title}"?`, message: 'As inscrições vinculadas a este edital também serão excluídas. Esta ação não pode ser desfeita.', danger: true, confirmLabel: 'Excluir' })
+    if (ok) crud.remove.mutate(item.id)
+  }
+
+  const newButton = isAdmin && <button type="button" onClick={openNew} className="btn btn-primary"><Plus size={16} /> Novo edital</button>
+
   return (
     <div className="animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Editais
-          </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Gerenciar editais públicos, chamadas e concursos
-          </p>
-        </div>
-        <button onClick={openNew} className="btn btn-primary">
-          <Plus size={16} /> Novo Edital
-        </button>
-      </div>
+      <PageHeader icon={FileText} title="Editais" description="Editais públicos, chamadas e concursos culturais." actions={newButton} />
 
-      {/* List */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="card p-5">
-              <div className="skeleton h-4 w-full" />
-            </div>
-          ))}
-        </div>
+      {crud.isLoading ? (
+        <SkeletonList rows={4} />
+      ) : crud.error ? (
+        <ErrorState error={crud.error} onRetry={() => crud.refetch()} />
+      ) : crud.items.length === 0 ? (
+        <EmptyState icon={FileText} title="Nenhum edital criado ainda" description="Crie o primeiro edital para abrir inscrições." action={newButton} />
       ) : (
-        <div className="space-y-3">
-          {editais?.map((edital: any) => (
-            <div key={edital.id} className="card p-5">
-              <div className="flex items-start justify-between gap-4">
-                {/* Cover thumb */}
-                {edital.cover_url && (
-                  <img
-                    src={edital.cover_url}
-                    alt={edital.title}
-                    className="w-16 h-16 rounded-xl object-cover flex-shrink-0"
-                  />
-                )}
+        <ul className="space-y-3">
+          {crud.items.map((edital) => (
+            <li key={edital.id} className="card p-5">
+              <div className="flex items-start gap-4">
+                {edital.cover_url && <img src={edital.cover_url} alt="" className="w-16 h-16 rounded-xl object-cover flex-shrink-0 hidden sm:block" />}
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <span className={`badge text-xs ${STATUS_COLORS[edital.status] ?? 'badge-slate'}`}>
-                      {STATUS_LABELS[edital.status] ?? edital.status}
-                    </span>
-                    {edital.categories && (
-                      <span className="badge badge-amber text-xs">
-                        {edital.categories.icon} {edital.categories.name}
-                      </span>
-                    )}
+                    <span className={`badge text-xs ${STATUS_BADGE[edital.status] ?? 'badge-slate'}`}>{STATUS_LABELS[edital.status] ?? edital.status}</span>
+                    {edital.categories && <span className="badge badge-amber text-xs">{edital.categories.icon} {edital.categories.name}</span>}
                     {edital.document_url && (
-                      <a
-                        href={edital.document_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="badge text-xs flex items-center gap-1 hover:opacity-80 transition-opacity"
-                        style={{ background: 'var(--bg-secondary)', color: 'var(--accent)' }}
-                        onClick={e => e.stopPropagation()}
-                      >
+                      <a href={edital.document_url} target="_blank" rel="noopener noreferrer" className="badge text-xs inline-flex items-center gap-1 hover:opacity-80" style={{ background: 'var(--bg-secondary)', color: 'var(--accent)' }}>
                         <Download size={10} /> Documento
                       </a>
                     )}
                   </div>
-                  <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-                    {edital.title}
-                  </h3>
-                  <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-                    <span className="flex items-center gap-1">
-                      <Calendar size={12} />
-                      {formatDate(edital.start_date)} – {formatDate(edital.end_date)}
-                    </span>
-                    {edital.prize_value && (
-                      <span>R$ {Number(edital.prize_value).toLocaleString('pt-BR')}</span>
-                    )}
-                    {edital.total_slots && (
-                      <span>{edital.total_slots} vagas</span>
-                    )}
+                  <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>{edital.title}</h3>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <span className="inline-flex items-center gap-1"><Calendar size={12} /> {formatDate(edital.start_date)} – {formatDate(edital.end_date)}</span>
+                    {edital.prize_value != null && <span>R$ {Number(edital.prize_value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>}
+                    {edital.total_slots != null && <span>{edital.total_slots} vagas</span>}
+                    {edital.published_at && <span>Publicado em {formatDate(edital.published_at)}</span>}
                   </div>
                 </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 flex-shrink-0">
-                  {edital.status === 'RASCUNHO' && (
-                    <button
-                      onClick={() => openEdit(edital)}
-                      title="Publicar"
-                      className="p-1.5 rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950 transition-colors"
-                    >
-                      <Send size={14} />
-                    </button>
+                <RowActions canWrite={isAdmin} onEdit={() => openEdit(edital)} onDelete={() => onDelete(edital)}>
+                  {isAdmin && edital.status === 'RASCUNHO' && (
+                    <IconButton label="Publicar edital" tone="success" onClick={() => onPublish(edital)} disabled={crud.save.isPending}><Send size={14} /></IconButton>
                   )}
-                  <button
-                    onClick={() => openEdit(edital)}
-                    title="Editar"
-                    className="p-1.5 rounded text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950 transition-colors"
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    onClick={() => confirmDelete(edital)}
-                    title="Excluir"
-                    className="p-1.5 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                </RowActions>
               </div>
-            </div>
+            </li>
           ))}
-
-          {editais?.length === 0 && (
-            <div className="card p-12 text-center">
-              <FileText
-                className="mx-auto h-12 w-12 mb-3"
-                style={{ color: 'var(--text-muted)' }}
-              />
-              <p className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-                Nenhum edital criado ainda
-              </p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                Clique em "Novo Edital" para criar o primeiro.
-              </p>
-            </div>
-          )}
-        </div>
+        </ul>
       )}
 
-      {/* Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div
-            className="w-full max-w-2xl rounded-2xl p-6 max-h-[90vh] overflow-y-auto shadow-2xl"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-          >
-            {/* Modal header */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                {editing ? 'Editar Edital' : 'Novo Edital'}
-              </h2>
-              <button
-                onClick={closeModal}
-                className="p-2 rounded-lg transition-colors hover:bg-red-500/10"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                <X size={18} />
-              </button>
+      <Modal
+        open={open}
+        onClose={close}
+        title={editing ? 'Editar edital' : 'Novo edital'}
+        size="lg"
+        locked={crud.save.isPending}
+        footer={<FormFooter formId={formId} onCancel={close} loading={crud.save.isPending} canWrite={isAdmin} submitLabel={editing ? 'Salvar alterações' : 'Criar edital'} />}
+      >
+        <form id={formId} onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          <fieldset disabled={!isAdmin} className="space-y-4 min-w-0">
+            <div>
+              <p className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Imagem de capa</p>
+              <input type="hidden" {...register('cover_url')} />
+              <ImageUploader label="Imagem de capa" currentUrl={coverUrl || null} folder="editais" onUpload={(url) => setValue('cover_url', url, { shouldDirty: true })} />
             </div>
-
-            {/* Error */}
-            {errorMsg && (
-              <div className="mb-4 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-600 text-sm">
-                {errorMsg}
-              </div>
-            )}
-
-            {/* Form */}
-            <form onSubmit={handleSubmit(data => saveMutation.mutate(data))} className="space-y-4">
-              {/* Imagem de Capa */}
-              <div>
-                <label className="label">Imagem de Capa</label>
-                <ImageUploader
-                  currentUrl={editing?.cover_url}
-                  onUpload={url => setCoverUrl(url)}
-                  folder="editais"
-                  maxMb={10}
-                />
-              </div>
-
-              {/* Título */}
-              <div>
-                <label className="label">Título *</label>
-                <input
-                  {...register('title', { required: 'Título é obrigatório' })}
-                  className="input w-full"
-                  placeholder="Ex: Edital de Fomento à Cultura 2026"
-                />
-                {errors.title && <p className="text-xs text-red-500 mt-1">{errors.title.message}</p>}
-              </div>
-
-              {/* Categoria e Status */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Categoria</label>
-                  <div className="relative">
-                    <select {...register('category_id')} className="input w-full appearance-none pr-8">
-                      <option value="">Sem categoria</option>
-                      {categories?.map((cat: any) => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.icon} {cat.name}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-                  </div>
-                </div>
-                <div>
-                  <label className="label">Status *</label>
-                  <div className="relative">
-                    <select
-                      {...register('status', { required: true })}
-                      className="input w-full appearance-none pr-8"
-                    >
-                      <option value="RASCUNHO">Rascunho</option>
-                      <option value="PUBLICADO">Publicado</option>
-                      <option value="ENCERRADO">Encerrado</option>
-                      <option value="CANCELADO">Cancelado</option>
-                    </select>
-                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Datas */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Data de Início *</label>
-                  <input
-                    type="date"
-                    {...register('start_date', { required: 'Data de início obrigatória' })}
-                    className="input w-full"
-                  />
-                  {errors.start_date && (
-                    <p className="text-xs text-red-500 mt-1">{errors.start_date.message}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="label">Data de Encerramento *</label>
-                  <input
-                    type="date"
-                    {...register('end_date', { required: 'Data de encerramento obrigatória' })}
-                    className="input w-full"
-                  />
-                  {errors.end_date && (
-                    <p className="text-xs text-red-500 mt-1">{errors.end_date.message}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Vagas e Premiação */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Total de Vagas</label>
-                  <input
-                    type="number"
-                    min={0}
-                    {...register('total_slots')}
-                    className="input w-full"
-                    placeholder="Ex: 30"
-                  />
-                </div>
-                <div>
-                  <label className="label">Valor da Premiação (R$)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    {...register('prize_value')}
-                    className="input w-full"
-                    placeholder="Ex: 5000.00"
-                  />
-                </div>
-              </div>
-
-              {/* Descrição */}
-              <div>
-                <label className="label">Descrição *</label>
-                <textarea
-                  {...register('description', { required: 'Descrição é obrigatória' })}
-                  className="input w-full"
-                  rows={4}
-                  placeholder="Descreva o objetivo e detalhes do edital..."
-                />
-                {errors.description && (
-                  <p className="text-xs text-red-500 mt-1">{errors.description.message}</p>
+            <Field label="Título" required error={errors.title?.message}>
+              {(p) => <input {...p} {...register('title', { required: 'Informe o título do edital.' })} className="input w-full" placeholder="Ex.: Edital de Fomento à Cultura 2026" />}
+            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Categoria">
+                {(p) => (
+                  <select {...p} {...register('category_id')} className="input w-full">
+                    <option value="">Sem categoria</option>
+                    {categories?.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                  </select>
                 )}
-              </div>
-
-              {/* Requisitos */}
-              <div>
-                <label className="label">Requisitos / Critérios de Participação</label>
-                <textarea
-                  {...register('requirements')}
-                  className="input w-full"
-                  rows={3}
-                  placeholder="Liste os requisitos para participação..."
-                />
-              </div>
-
-              {/* Documento Oficial */}
-              <div>
-                <label className="label">Documento Oficial (PDF/DOC)</label>
-                <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-                  Anexe o edital completo, regulamento ou edital em PDF para download público.
-                </p>
-                <FileUploader
-                  currentUrl={editing?.document_url}
-                  onUpload={url => setDocumentUrl(url)}
-                  folder="editais/docs"
-                  maxMb={20}
-                  label="Clique para anexar o documento do edital"
-                />
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="btn btn-secondary flex-1"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={saveMutation.isPending}
-                  className="btn btn-primary flex-1"
-                >
-                  {saveMutation.isPending ? 'Salvando...' : editing ? 'Salvar alterações' : 'Criar Edital'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+              </Field>
+              <Field label="Status" required hint="Ao publicar, a data e o responsável pela publicação ficam registrados.">
+                {(p) => (
+                  <select {...p} {...register('status', { required: true })} className="input w-full">
+                    {(Object.keys(STATUS_LABELS) as EditalStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                  </select>
+                )}
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Início das inscrições" required error={errors.start_date?.message}>
+                {(p) => <input {...p} {...register('start_date', { required: 'Informe a data de início.' })} type="date" className="input w-full" />}
+              </Field>
+              <Field label="Encerramento" required error={errors.end_date?.message}>
+                {(p) => (
+                  <input
+                    {...p}
+                    {...register('end_date', {
+                      required: 'Informe a data de encerramento.',
+                      validate: (v, all) => !all.start_date || v >= all.start_date || 'O encerramento deve ser depois do início.',
+                    })}
+                    type="date"
+                    className="input w-full"
+                  />
+                )}
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Total de vagas" error={errors.total_slots?.message}>
+                {(p) => <input {...p} {...register('total_slots', { ...asNumberOrNull, min: { value: 0, message: 'Informe um número positivo.' } })} type="number" min={0} className="input w-full" placeholder="Ex.: 30" />}
+              </Field>
+              <Field label="Valor da premiação (R$)" error={errors.prize_value?.message}>
+                {(p) => <input {...p} {...register('prize_value', { ...asNumberOrNull, min: { value: 0, message: 'Informe um valor positivo.' } })} type="number" min={0} step="0.01" className="input w-full" placeholder="Ex.: 5000.00" />}
+              </Field>
+            </div>
+            <Field label="Descrição" required error={errors.description?.message}>
+              {(p) => <textarea {...p} {...register('description', { required: 'Descreva o edital.' })} className="input w-full" rows={4} placeholder="Objetivo e detalhes do edital" />}
+            </Field>
+            <Field label="Requisitos / critérios de participação">
+              {(p) => <textarea {...p} {...register('requirements')} className="input w-full" rows={3} />}
+            </Field>
+            <div>
+              <p className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>Documento oficial (PDF/DOC)</p>
+              <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Anexe o edital completo ou regulamento para download público.</p>
+              <input type="hidden" {...register('document_url')} />
+              <FileUploader label="Anexar o documento do edital" currentUrl={documentUrl || null} folder="editais/docs" maxMb={20} onUpload={(url) => setValue('document_url', url, { shouldDirty: true })} />
+            </div>
+          </fieldset>
+        </form>
+      </Modal>
     </div>
   )
 }

@@ -1,80 +1,133 @@
-import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { getArtistById } from '@/services/artistService'
-import { getAgentById } from '@/services/culturalAgentService'
+import { useState } from 'react'
+import { useParams, Link, useLocation } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowLeft, MapPin, Star, CheckCircle, Music, Globe, ExternalLink,
-  Calendar, Award, Briefcase, Play, FileText
+  ArrowLeft, MapPin, Star, Music, Globe, ExternalLink, FileText, Users, UserPlus,
+  Check, X, Loader2, Clock, User, Phone, MessageCircle, Building2,
 } from 'lucide-react'
-import type { SocialPlatform } from '@/types'
+import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/components/ui/Toast'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import {
+  getPublicAgentById, getAgentMembers, requestAgentMembership, respondToInvite,
+  getCurriculumUrl, getTypologyTree, flattenTypologyTree,
+} from '@/services/culturalAgentService'
+import { safeUrl, whatsappLink, formatPhone, errorMessage } from '@/lib/utils'
+import type { SocialPlatform, PublicCulturalAgent } from '@/types'
 
 const platformIcons: Record<SocialPlatform, React.ReactNode> = {
-  INSTAGRAM: <span className="text-sm">📸</span>,
-  FACEBOOK: <span className="text-sm">📘</span>,
-  YOUTUBE: <span className="text-sm">▶️</span>,
-  TIKTOK: <Music size={16} />,
-  SPOTIFY: <Music size={16} />,
-  SOUNDCLOUD: <Music size={16} />,
-  WEBSITE: <Globe size={16} />,
-  LINKEDIN: <ExternalLink size={16} />,
-  WHATSAPP: <ExternalLink size={16} />,
-  PORTFOLIO: <Globe size={16} />,
-  OUTRO: <ExternalLink size={16} />,
+  INSTAGRAM: <span className="text-sm" aria-hidden="true">📸</span>,
+  FACEBOOK: <span className="text-sm" aria-hidden="true">📘</span>,
+  YOUTUBE: <span className="text-sm" aria-hidden="true">▶️</span>,
+  TIKTOK: <Music size={16} aria-hidden="true" />,
+  SPOTIFY: <Music size={16} aria-hidden="true" />,
+  SOUNDCLOUD: <Music size={16} aria-hidden="true" />,
+  WEBSITE: <Globe size={16} aria-hidden="true" />,
+  LINKEDIN: <ExternalLink size={16} aria-hidden="true" />,
+  WHATSAPP: <MessageCircle size={16} aria-hidden="true" />,
+  PORTFOLIO: <Globe size={16} aria-hidden="true" />,
+  OUTRO: <ExternalLink size={16} aria-hidden="true" />,
+}
+
+const platformLabels: Record<SocialPlatform, string> = {
+  INSTAGRAM: 'Instagram',
+  FACEBOOK: 'Facebook',
+  YOUTUBE: 'YouTube',
+  TIKTOK: 'TikTok',
+  SPOTIFY: 'Spotify',
+  SOUNDCLOUD: 'SoundCloud',
+  WEBSITE: 'Site',
+  LINKEDIN: 'LinkedIn',
+  WHATSAPP: 'WhatsApp',
+  PORTFOLIO: 'Portfólio',
+  OUTRO: 'Link',
+}
+
+function agentKind(agent: PublicCulturalAgent): string {
+  if (agent.collective_type === 'coletivo') return 'Coletivo / Grupo cultural'
+  return agent.person_type === 'juridica' ? 'Pessoa Jurídica' : 'Pessoa Física'
 }
 
 export function ArtistProfilePage() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
+  const { user } = useAuth()
+  const toast = useToast()
+  const qc = useQueryClient()
 
-  const { data: artist, isLoading } = useQuery({
-    queryKey: ['artist-or-agent', id],
-    queryFn: async () => {
-      // 1. Tenta buscar da tabela cultural_agents (SMIIC oficial)
-      try {
-        const agent = await getAgentById(id!)
-        if (agent) {
-          const addr = Array.isArray((agent as any).agent_addresses)
-            ? (agent as any).agent_addresses[0]
-            : (agent as any).agent_addresses
-          const firstTypology = (agent as any).agent_typologies?.[0]?.cultural_typologies?.name
-          const firstArea = (agent as any).agent_areas?.[0]?.categories
-          return {
-            id: agent.id,
-            artistic_name: agent.display_name || agent.legal_name,
-            biography: agent.biography,
-            photo_url: agent.photo_url,
-            city: addr?.city || 'Água Boa',
-            neighborhood: addr?.neighborhood,
-            state: addr?.state || 'MT',
-            is_verified: agent.registration_status === 'aprovado',
-            categories: firstArea ? { name: firstArea.name, icon: firstArea.icon } : (firstTypology ? { name: firstTypology, icon: '🏛️' } : null),
-            social_links: (agent as any).agent_social_links?.map((s: any) => ({
-              platform: s.platform.toUpperCase(),
-              url: s.url,
-            })) ?? [],
-            privacy_settings: (agent as any).agent_privacy ?? { show_phone: false, show_email: false, show_social: true },
-            curriculum_url: agent.curriculum_url,
-            is_smiic_agent: true,
-            person_type: agent.person_type,
-            collective_type: agent.collective_type,
-          } as any
-        }
-      } catch (err) {
-        console.warn('Erro ao buscar agente cultural:', err)
-      }
+  const [requestModalOpen, setRequestModalOpen] = useState(false)
+  const [requestedRole, setRequestedRole] = useState('')
+  const [requestMessage, setRequestMessage] = useState('')
 
-      // 2. Fallback para tabela legado de artistas
-      return getArtistById(id!)
-    },
+  const { data: agent, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['public-agent', id],
+    queryFn: () => getPublicAgentById(id!),
     enabled: !!id,
+  })
+
+  const { data: typologyMap } = useQuery({
+    queryKey: ['typology-tree', 'agent'],
+    queryFn: async () => flattenTypologyTree(await getTypologyTree('agent')),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: curriculumUrl } = useQuery({
+    queryKey: ['agent-curriculum-url', id, agent?.curriculum_url],
+    queryFn: () => getCurriculumUrl(agent?.curriculum_url),
+    enabled: !!agent?.curriculum_url,
+  })
+
+  const isCollective = agent?.collective_type === 'coletivo'
+
+  const { data: members = [] } = useQuery({
+    queryKey: ['agent-public-members', id],
+    queryFn: () => getAgentMembers(id!),
+    enabled: !!id && !!agent,
+    retry: false,
+  })
+
+  const myMembership = user ? members.find((m) => m.user_id === user.id) : null
+  const acceptedMembers = members.filter((m) => m.invite_status === 'accepted')
+
+  const requestMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) throw new Error('Faça login para solicitar entrada')
+      return await requestAgentMembership(id!, requestedRole, requestMessage)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent-public-members', id] })
+      toast.success('Solicitação enviada com sucesso! O responsável pelo grupo receberá sua solicitação.')
+      setRequestModalOpen(false)
+      setRequestedRole('')
+      setRequestMessage('')
+    },
+    onError: (err: unknown) => {
+      toast.error(errorMessage(err, 'Erro ao enviar solicitação.'))
+    },
+  })
+
+  const respondInviteMutation = useMutation({
+    mutationFn: async ({ membershipId, accept }: { membershipId: string; accept: boolean }) => {
+      await respondToInvite(membershipId, accept)
+    },
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['agent-public-members', id] })
+      qc.invalidateQueries({ queryKey: ['my-agents'] })
+      if (variables.accept) toast.success('Você aceitou o convite e agora faz parte do grupo!')
+      else toast.info('Convite recusado.')
+    },
+    onError: (err: unknown) => {
+      toast.error(errorMessage(err, 'Erro ao responder ao convite.'))
+    },
   })
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-12">
+      <div className="mx-auto max-w-4xl px-4 py-12" aria-busy="true">
         <div className="skeleton h-8 w-32 mb-8" />
         <div className="card p-8">
           <div className="flex gap-6 mb-6">
-            <div className="skeleton h-24 w-24 rounded-full flex-shrink-0" />
+            <div className="skeleton h-28 w-28 rounded-2xl flex-shrink-0" />
             <div className="flex-1 space-y-3">
               <div className="skeleton h-6 w-1/2" />
               <div className="skeleton h-4 w-1/3" />
@@ -88,258 +141,384 @@ export function ArtistProfilePage() {
     )
   }
 
-  if (!artist) {
+  if (isError) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-12 text-center">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Artista não encontrado</h1>
-        <Link to="/pesquisa" className="btn btn-primary">Voltar à pesquisa</Link>
+      <div className="mx-auto max-w-4xl px-4 py-12">
+        <ErrorState error={error} onRetry={() => refetch()} />
       </div>
     )
   }
 
-  const privacy = (artist as any).privacy_settings
-  const profile = (artist as any).profiles
-  const socialLinks = (artist as any).social_links ?? []
-  const portfolio = (artist as any).portfolio_items ?? []
-  const awards = (artist as any).artist_awards ?? []
-  const projects = (artist as any).artist_projects ?? []
+  if (!agent) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-12">
+        <EmptyState
+          icon={Users}
+          title="Agente cultural não encontrado"
+          description="Este perfil não existe, não é público ou ainda não foi aprovado pela Secretaria."
+          action={<Link to="/agentes" className="btn btn-primary">Voltar aos agentes culturais</Link>}
+        />
+      </div>
+    )
+  }
+
+  const name = agent.display_name ?? 'Agente Cultural'
+  const typologyPaths = (agent.typologies ?? [])
+    .map((t) => ({ id: t.id, label: typologyMap?.get(t.typology_id)?.path.join(' › ') ?? t.cultural_typologies?.name ?? null }))
+    .filter((t): t is { id: string; label: string } => !!t.label)
+  const areas = (agent.areas ?? []).filter((a) => a.categories)
+  const socialLinks = agent.show_social
+    ? (agent.social_links ?? [])
+        .map((l) => ({ ...l, href: safeUrl(l.url) }))
+        .filter((l): l is typeof l & { href: string } => !!l.href)
+    : []
+  const wa = agent.phone ? whatsappLink(agent.phone, `Olá, ${name}! Encontrei seu perfil no SMIIC Água Boa.`) : null
+  const place = [agent.neighborhood, agent.city ?? 'Água Boa'].filter(Boolean).join(', ')
 
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-12 animate-fade-in">
-      {/* Back */}
-      <Link to="/pesquisa" className="inline-flex items-center gap-2 text-sm mb-8 hover:text-amber-400 transition-colors" style={{ color: 'var(--text-muted)' }}>
-        <ArrowLeft className="h-4 w-4" />
-        Voltar à pesquisa
+      <Link
+        to="/agentes"
+        className="inline-flex items-center gap-2 text-sm mb-8 hover:text-amber-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded"
+        style={{ color: 'var(--text-muted)' }}
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Voltar aos agentes culturais
       </Link>
 
-      {/* Header card */}
+      {/* Cabeçalho */}
       <div className="card p-6 sm:p-8 mb-6">
         <div className="flex flex-col sm:flex-row gap-6">
-          {/* Photo */}
           <div className="relative flex-shrink-0">
-            {artist.photo_url ? (
+            {agent.photo_url ? (
               <img
-                src={artist.photo_url}
-                alt={artist.artistic_name ?? ''}
+                src={agent.photo_url}
+                alt={`Foto de ${name}`}
+                loading="lazy"
                 className="h-28 w-28 rounded-2xl object-cover ring-4 ring-amber-500/20"
               />
             ) : (
               <div
+                aria-hidden="true"
                 className="h-28 w-28 rounded-2xl flex items-center justify-center ring-4 ring-amber-500/20"
                 style={{ background: 'linear-gradient(135deg, #f59e0b, #ea580c)' }}
               >
-                <span className="text-4xl font-bold text-slate-900 dark:text-white">
-                  {(artist.artistic_name ?? 'A')[0].toUpperCase()}
-                </span>
+                <span className="text-4xl font-bold text-white">{name[0]?.toUpperCase() ?? 'A'}</span>
               </div>
             )}
-            {artist.is_verified && (
-              <div className="absolute -bottom-2 -right-2 flex items-center gap-1 badge badge-amber">
-                <Star className="h-3 w-3 fill-current" />
-                Verificado
-              </div>
-            )}
+            <div className="absolute -bottom-2 -right-2 flex items-center gap-1 badge badge-amber">
+              <Star className="h-3 w-3 fill-current" aria-hidden="true" />
+              Verificado
+            </div>
           </div>
 
-          {/* Info */}
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">
-              {artist.artistic_name ?? profile?.full_name}
-            </h1>
-            {artist.artistic_name && profile?.full_name && (
-              <p className="text-sm mb-2" style={{ color: 'var(--text-muted)' }}>
-                {profile.full_name}
-              </p>
-            )}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>{name}</h1>
+            <p className="text-sm mb-3 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
+              {isCollective ? <Users className="h-3.5 w-3.5" aria-hidden="true" /> : agent.person_type === 'juridica' ? <Building2 className="h-3.5 w-3.5" aria-hidden="true" /> : <User className="h-3.5 w-3.5" aria-hidden="true" />}
+              {agentKind(agent)}
+            </p>
 
-            <div className="flex flex-wrap gap-2 mb-4">
-              {(artist as any).categories && (
-                <span className="badge badge-amber">
-                  {(artist as any).categories.icon} {(artist as any).categories.name}
-                </span>
-              )}
-              {(artist as any).subcategories && (
-                <span className="badge badge-blue">{(artist as any).subcategories.name}</span>
-              )}
-              {artist.is_available && (
-                <span className="badge badge-green">
-                  <span className="h-2 w-2 rounded-full bg-green-400 inline-block" />
-                  Disponível para eventos
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-muted)' }}>
-              <MapPin className="h-3.5 w-3.5" />
-              {privacy?.show_location !== false && artist.neighborhood
-                ? `${artist.neighborhood}, `
-                : ''}
-              {artist.city} - {artist.state}
-            </div>
-
-            {artist.musical_genre && (
-              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-                🎵 {artist.musical_genre}
-              </p>
-            )}
-
-            {/* Social links */}
-            {privacy?.show_social !== false && socialLinks.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-4">
-                {socialLinks.map((link: any) => (
-                  <a
-                    key={link.id}
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 badge badge-slate hover:badge-amber transition-all"
-                  >
-                    {platformIcons[link.platform as SocialPlatform]}
-                    {link.username ?? link.platform}
-                  </a>
+            {(areas.length > 0 || typologyPaths.length > 0) && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {areas.map((a) => (
+                  <span key={a.id} className="badge badge-amber">
+                    {a.categories?.icon ? `${a.categories.icon} ` : ''}{a.categories?.name}
+                  </span>
+                ))}
+                {typologyPaths.map((t) => (
+                  <span key={t.id} className="badge badge-slate">{t.label}</span>
                 ))}
               </div>
+            )}
+
+            <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-muted)' }}>
+              <MapPin className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+              <span>{place}{agent.state ? ` - ${agent.state}` : ''}</span>
+            </div>
+
+            {agent.phone && (
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                <a href={`tel:${agent.phone}`} className="badge badge-slate gap-1.5 hover:opacity-80">
+                  <Phone size={14} aria-hidden="true" />
+                  {formatPhone(agent.phone)}
+                </a>
+                {wa && (
+                  <a
+                    href={wa}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="badge badge-green gap-1.5 hover:opacity-80"
+                  >
+                    <MessageCircle size={14} aria-hidden="true" />
+                    WhatsApp
+                  </a>
+                )}
+              </div>
+            )}
+
+            {socialLinks.length > 0 && (
+              <ul className="flex flex-wrap gap-2 mt-4 list-none p-0 m-0" aria-label="Redes sociais">
+                {socialLinks.map((link) => (
+                  <li key={link.id}>
+                    <a
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 badge badge-slate hover:opacity-80 transition-all"
+                    >
+                      {platformIcons[link.platform] ?? platformIcons.OUTRO}
+                      {link.username ?? platformLabels[link.platform] ?? link.platform}
+                    </a>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>
 
-        {/* Biography */}
-        {artist.biography && (
+        {agent.biography && (
           <div className="mt-6 pt-6 border-t" style={{ borderColor: 'var(--border)' }}>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Biografia</h2>
-            <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              {artist.biography}
+            <h2 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Biografia</h2>
+            <p className="text-sm leading-relaxed whitespace-pre-line" style={{ color: 'var(--text-secondary)' }}>
+              {agent.biography}
             </p>
           </div>
         )}
       </div>
 
-      {/* Currículo / Portfólio em PDF do SMIIC */}
-      {artist.curriculum_url && (
+      {/* Currículo */}
+      {agent.curriculum_url && (
         <div className="card p-6 mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
-            <FileText className="h-5 w-5 text-amber-400" />
-            Currículo / Portfólio Artístico (PDF)
+          <h2 className="text-lg font-semibold mb-2 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+            <FileText className="h-5 w-5 text-amber-500" aria-hidden="true" />
+            Currículo / Portfólio Artístico
           </h2>
-          <p className="text-xs text-slate-400 mb-4">
-            Documento comprobatório e trajetória artística oficial disponibilizada pelo agente cultural.
+          <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+            Trajetória artística disponibilizada pelo agente cultural.
           </p>
-          <a
-            href={artist.curriculum_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-primary inline-flex items-center gap-2 text-xs"
-          >
-            <ExternalLink size={14} />
-            Visualizar Currículo Completo (PDF) ↗
-          </a>
+          {curriculumUrl ? (
+            <a
+              href={curriculumUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary inline-flex items-center gap-2 text-xs"
+            >
+              <ExternalLink size={14} aria-hidden="true" />
+              Visualizar currículo (PDF)
+            </a>
+          ) : (
+            <span className="text-xs inline-flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+              <Loader2 size={14} className="animate-spin" aria-hidden="true" /> Preparando o documento...
+            </span>
+          )}
         </div>
       )}
 
-      {/* Portfolio */}
-      {portfolio.length > 0 && (
+      {/* Elenco & Integrantes */}
+      {(isCollective || acceptedMembers.length > 0) && (
         <div className="card p-6 mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-            <Play className="h-5 w-5 text-amber-400" />
-            Portfólio
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {portfolio.map((item: any) => (
-              <a
-                key={item.id}
-                href={item.url ?? '#'}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 p-3 rounded-lg transition-all"
-                style={{ background: 'var(--bg-secondary)' }}
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg flex-shrink-0 bg-amber-500/10">
-                  {item.type === 'VIDEO' && <Play className="h-5 w-5 text-amber-400" />}
-                  {item.type === 'AUDIO' && <Music className="h-5 w-5 text-amber-400" />}
-                  {item.type === 'IMAGEM' && <span className="text-lg">🖼️</span>}
-                  {item.type === 'PDF' && <span className="text-lg">📄</span>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{item.title}</p>
-                  {item.description && (
-                    <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{item.description}</p>
-                  )}
-                </div>
-                <ExternalLink className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
+          <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-amber-500" aria-hidden="true" />
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Elenco & Integrantes ({acceptedMembers.length})
+              </h2>
+            </div>
 
-      {/* Awards & Projects */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {awards.length > 0 && (
-          <div className="card p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-              <Award className="h-5 w-5 text-amber-400" />
-              Premiações e Reconhecimentos
-            </h2>
-            <div className="space-y-3">
-              {awards.map((award: any) => (
-                <div key={award.id} className="flex gap-3">
-                  <div className="h-6 w-6 flex items-center justify-center text-amber-400 flex-shrink-0 mt-0.5">
-                    🏆
+            {isCollective && (
+              <div>
+                {!user ? (
+                  <Link
+                    to="/login"
+                    state={{ from: location }}
+                    className="btn btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+                  >
+                    <UserPlus size={14} aria-hidden="true" />
+                    <span>Entrar para pedir participação</span>
+                  </Link>
+                ) : myMembership?.invite_status === 'accepted' ? (
+                  <span className="badge badge-green text-xs py-1 px-2.5 flex items-center gap-1">
+                    <Check size={12} aria-hidden="true" />
+                    Você é integrante deste grupo
+                  </span>
+                ) : myMembership?.invite_status === 'requested' ? (
+                  <span className="badge badge-amber text-xs py-1 px-2.5 flex items-center gap-1">
+                    <Clock size={12} aria-hidden="true" />
+                    Solicitação enviada (aguardando aprovação)
+                  </span>
+                ) : myMembership?.invite_status === 'pending' ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-amber-500 font-medium">Você foi convidado!</span>
+                    <button
+                      type="button"
+                      onClick={() => respondInviteMutation.mutate({ membershipId: myMembership.id, accept: true })}
+                      disabled={respondInviteMutation.isPending}
+                      className="btn btn-primary text-xs py-1 px-2.5"
+                    >
+                      <Check size={12} aria-hidden="true" /> Aceitar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => respondInviteMutation.mutate({ membershipId: myMembership.id, accept: false })}
+                      disabled={respondInviteMutation.isPending}
+                      className="btn btn-secondary text-xs py-1 px-2.5 text-red-500"
+                    >
+                      <X size={12} aria-hidden="true" /> Recusar
+                    </button>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-900 dark:text-white">{award.title}</p>
-                    {award.institution && (
-                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                        {award.institution} {award.year && `· ${award.year}`}
-                      </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setRequestModalOpen(true)}
+                    className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 shadow"
+                  >
+                    <UserPlus size={14} aria-hidden="true" />
+                    <span>Pedir para participar</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {acceptedMembers.length === 0 ? (
+            <p className="text-xs py-3 text-center border border-dashed rounded-xl" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
+              Nenhum integrante público listado no momento.
+            </p>
+          ) : (
+            <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 list-none p-0 m-0">
+              {acceptedMembers.map((m) => (
+                <li
+                  key={m.id}
+                  className="p-3 rounded-xl flex items-center gap-3 border transition-all"
+                  style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+                >
+                  <div
+                    className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 relative shadow-sm border"
+                    style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+                  >
+                    {m.profiles?.avatar_url ? (
+                      <img src={m.profiles.avatar_url} alt="" loading="lazy" className="w-full h-full object-cover" />
+                    ) : (
+                      <User size={18} aria-hidden="true" style={{ color: 'var(--text-muted)' }} />
                     )}
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {projects.length > 0 && (
-          <div className="card p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-amber-400" />
-              Projetos
-            </h2>
-            <div className="space-y-3">
-              {projects.map((project: any) => (
-                <div key={project.id}>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium text-slate-900 dark:text-white">
-                        {project.title}
-                        {project.is_ongoing && (
-                          <span className="ml-2 badge badge-green text-xs">Em andamento</span>
-                        )}
-                      </p>
-                      {project.description && (
-                        <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                          {project.description}
-                        </p>
-                      )}
-                    </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold truncate leading-tight" style={{ color: 'var(--text-primary)' }}>
+                      {m.profiles?.full_name || 'Artista'}
+                    </p>
+                    <p className="text-[11px] text-amber-500 truncate mt-0.5">
+                      {m.artist_role || (m.role === 'owner' ? 'Diretor / Responsável' : 'Integrante')}
+                    </p>
                   </div>
-                </div>
+                </li>
               ))}
-            </div>
-          </div>
-        )}
-      </div>
+            </ul>
+          )}
+        </div>
+      )}
 
-      {/* Experience */}
-      {artist.experience_years && (
-        <div className="card p-5 mt-6 flex items-center gap-3">
-          <Calendar className="h-5 w-5 text-amber-400" />
-          <p className="text-sm text-slate-900 dark:text-white">
-            <span className="font-semibold">{artist.experience_years} anos</span>
-            <span style={{ color: 'var(--text-muted)' }}> de experiência na área cultural</span>
-          </p>
+      {/* Diálogo: solicitar entrada */}
+      {requestModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+          onClick={(e) => { if (e.target === e.currentTarget) setRequestModalOpen(false) }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="request-membership-title"
+            className="w-full max-w-md rounded-2xl p-6 shadow-2xl border relative animate-scale-up"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--accent)' }}
+                >
+                  <UserPlus size={16} aria-hidden="true" />
+                </div>
+                <h3 id="request-membership-title" className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
+                  Solicitar entrada no grupo
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRequestModalOpen(false)}
+                aria-label="Fechar"
+                className="p-1 rounded-lg hover:opacity-70"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+              Envie uma solicitação para participar de <strong>{name}</strong>. Os responsáveis receberão sua notificação na plataforma para aprovação.
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                requestMutation.mutate()
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label htmlFor="request-role" className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
+                  Sua função artística / papel no grupo *
+                </label>
+                <input
+                  id="request-role"
+                  type="text"
+                  required
+                  placeholder="Ex.: Ator, Bailarino, Músico, Cenógrafo, Produtor"
+                  value={requestedRole}
+                  onChange={(e) => setRequestedRole(e.target.value)}
+                  className="input text-sm"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label htmlFor="request-message" className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
+                  Mensagem para os responsáveis (opcional)
+                </label>
+                <textarea
+                  id="request-message"
+                  rows={3}
+                  placeholder="Apresente-se brevemente ou mencione seu interesse em participar do grupo..."
+                  value={requestMessage}
+                  onChange={(e) => setRequestMessage(e.target.value)}
+                  className="input text-sm resize-none"
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end pt-2">
+                <button type="button" onClick={() => setRequestModalOpen(false)} className="btn btn-secondary text-xs px-4">
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={requestMutation.isPending || !requestedRole.trim()}
+                  className="btn btn-primary text-xs px-4 flex items-center gap-1.5"
+                >
+                  {requestMutation.isPending ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                      <span>Enviando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus size={14} aria-hidden="true" />
+                      <span>Enviar solicitação</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

@@ -1,441 +1,327 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState, type ReactNode } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ClipboardList, Eye, CheckCircle, XCircle, Printer, User, Phone, MapPin, Calendar, Shield } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { useState } from 'react'
-import {
-  ClipboardList, Search, Eye, CheckCircle, XCircle, Printer,
-  X, User, Phone, MapPin, Calendar, Shield, ChevronDown,
-} from 'lucide-react'
-import { formatDate } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
+import { errorMessage, formatDate, formatDateTime, formatPhone, formatCPF, whatsappLink } from '@/lib/utils'
+import { Modal } from '@/components/ui/Modal'
+import { useConfirm, LoadingButton } from '@/components/ui/ConfirmDialog'
+import { useToast } from '@/components/ui/Toast'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonList } from '@/components/ui/Spinner'
+import { AdminTable, IconButton, type AdminColumn } from '@/components/admin/AdminTable'
 
-const STATUS_LABELS: Record<string, string> = {
-  PENDENTE: 'Pendente',
-  CONFIRMADA: 'Confirmada',
-  CANCELADA: 'Cancelada',
+type EnrollmentStatus = 'PENDENTE' | 'CONFIRMADA' | 'CANCELADA'
+
+interface Enrollment {
+  id: string
+  workshop_id: string | null
+  enrollment_date: string | null
+  period: string | null
+  workshop_name: string | null
+  instructor: string | null
+  schedule: string | null
+  location: string | null
+  student_name: string
+  school: string | null
+  grade: string | null
+  school_period: string | null
+  age: number | null
+  guardian_name: string | null
+  phone: string | null
+  guardian_work_phone: string | null
+  address: string | null
+  accompanied_by_guardian: boolean
+  authorized_person: string | null
+  image_authorization: boolean
+  image_auth_guardian_name: string | null
+  image_auth_guardian_cpf: string | null
+  status: EnrollmentStatus
+  admin_notes: string | null
+  created_at: string
+  cultural_workshops?: { title: string } | null
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  PENDENTE: 'badge-amber',
-  CONFIRMADA: 'badge-green',
-  CANCELADA: 'badge-red',
-}
+const STATUS_LABELS: Record<EnrollmentStatus, string> = { PENDENTE: 'Pendente', CONFIRMADA: 'Confirmada', CANCELADA: 'Cancelada' }
+const STATUS_BADGE: Record<EnrollmentStatus, string> = { PENDENTE: 'badge-amber', CONFIRMADA: 'badge-green', CANCELADA: 'badge-red' }
+const PERIOD_LABELS: Record<string, string> = { manha: 'Manhã', tarde: 'Tarde', noite: 'Noite' }
+
+type StatusFilter = EnrollmentStatus | 'ALL'
 
 export function AdminEnrollments() {
+  const { isAdmin } = useAuth()
   const qc = useQueryClient()
+  const toast = useToast()
+  const confirm = useConfirm()
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [workshopFilter, setWorkshopFilter] = useState('ALL')
-  const [selected, setSelected] = useState<any>(null)
+  const [selected, setSelected] = useState<Enrollment | null>(null)
   const [adminNotes, setAdminNotes] = useState('')
 
-  // Oficinas para filtro
   const { data: workshops } = useQuery({
     queryKey: ['workshops_filter'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('cultural_workshops')
-        .select('id, title')
-        .order('title')
-      return data ?? []
+      const { data, error } = await supabase.from('cultural_workshops').select('id, title').order('title')
+      if (error) throw error
+      return (data ?? []) as { id: string; title: string }[]
     },
   })
 
-  // Matrículas
-  const { data: enrollments, isLoading } = useQuery({
-    queryKey: ['workshop_enrollments', statusFilter, workshopFilter],
+  const enrollmentsQuery = useQuery({
+    queryKey: ['workshop_enrollments', workshopFilter],
     queryFn: async () => {
-      let query = supabase
-        .from('workshop_enrollments')
-        .select('*, cultural_workshops(title)')
-        .order('created_at', { ascending: false })
-
-      if (statusFilter !== 'ALL') query = query.eq('status', statusFilter)
-      if (workshopFilter !== 'ALL') query = query.eq('workshop_id', workshopFilter)
-
-      const { data } = await query
-      return data ?? []
+      let q = supabase.from('workshop_enrollments').select('*, cultural_workshops(title)').order('created_at', { ascending: false })
+      if (workshopFilter !== 'ALL') q = q.eq('workshop_id', workshopFilter)
+      const { data, error } = await q
+      if (error) throw error
+      return (data ?? []) as Enrollment[]
     },
   })
+  const enrollments = useMemo(() => enrollmentsQuery.data ?? [], [enrollmentsQuery.data])
 
-  // Atualizar status
   const updateMutation = useMutation({
-    mutationFn: async ({ id, status, notes }: { id: string; status: string; notes?: string }) => {
-      await supabase
-        .from('workshop_enrollments')
-        .update({ status, admin_notes: notes })
-        .eq('id', id)
+    mutationFn: async ({ id, status, notes }: { id: string; status: EnrollmentStatus; notes: string }) => {
+      const { error } = await supabase.from('workshop_enrollments').update({ status, admin_notes: notes.trim() || null }).eq('id', id)
+      if (error) throw error
     },
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['workshop_enrollments'] })
+      toast.success(vars.status === 'CONFIRMADA' ? 'Matrícula confirmada.' : vars.status === 'CANCELADA' ? 'Matrícula cancelada.' : 'Ficha atualizada.')
       setSelected(null)
     },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 
-  // Filtro local por nome
-  const filtered = enrollments?.filter((e: any) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      e.student_name?.toLowerCase().includes(q) ||
-      e.guardian_name?.toLowerCase().includes(q) ||
-      e.workshop_name?.toLowerCase().includes(q)
-    )
-  })
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return enrollments.filter((e) => {
+      if (statusFilter !== 'ALL' && e.status !== statusFilter) return false
+      if (!q) return true
+      const workshop = e.workshop_name ?? e.cultural_workshops?.title ?? ''
+      return [e.student_name, e.guardian_name ?? '', workshop].some((v) => v.toLowerCase().includes(q))
+    })
+  }, [enrollments, search, statusFilter])
 
+  function openDetail(e: Enrollment) {
+    setSelected(e)
+    setAdminNotes(e.admin_notes ?? '')
+  }
+
+  async function onCancel() {
+    if (!selected) return
+    const ok = await confirm({ title: 'Cancelar esta matrícula?', message: `A ficha de ${selected.student_name} será marcada como cancelada.`, danger: true, confirmLabel: 'Cancelar matrícula', cancelLabel: 'Voltar' })
+    if (ok) updateMutation.mutate({ id: selected.id, status: 'CANCELADA', notes: adminNotes })
+  }
+
+  const columns: AdminColumn<Enrollment>[] = [
+    {
+      key: 'student', header: 'Aluno(a)',
+      render: (e) => (
+        <div>
+          <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{e.student_name}</p>
+          {e.age != null && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{e.age} anos</p>}
+        </div>
+      ),
+    },
+    { key: 'workshop', header: 'Oficina', render: (e) => e.workshop_name ?? e.cultural_workshops?.title ?? '—' },
+    { key: 'period', header: 'Período', render: (e) => (e.period ? PERIOD_LABELS[e.period] ?? e.period : '—') },
+    {
+      key: 'guardian', header: 'Responsável',
+      render: (e) => (
+        <div>
+          <p>{e.guardian_name ?? '—'}</p>
+          {e.phone && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatPhone(e.phone)}</p>}
+        </div>
+      ),
+    },
+    { key: 'date', header: 'Enviada em', render: (e) => formatDate(e.created_at) },
+    { key: 'status', header: 'Status', render: (e) => <span className={`badge text-xs ${STATUS_BADGE[e.status] ?? 'badge-slate'}`}>{STATUS_LABELS[e.status] ?? e.status}</span> },
+    { key: 'actions', header: <span className="sr-only">Ações</span>, align: 'right', render: (e) => <IconButton label={`Ver ficha de ${e.student_name}`} tone="primary" onClick={() => openDetail(e)}><Eye size={15} /></IconButton> },
+  ]
+
+  const counts = useMemo(() => {
+    const c: Record<StatusFilter, number> = { ALL: enrollments.length, PENDENTE: 0, CONFIRMADA: 0, CANCELADA: 0 }
+    enrollments.forEach((e) => { c[e.status] = (c[e.status] ?? 0) + 1 })
+    return c
+  }, [enrollments])
 
   return (
     <div className="animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <PageHeader icon={ClipboardList} title="Fichas de Matrícula" description={`${filtered.length} ficha(s) · oficinas culturais e escolinhas`} />
+
+      <div className="flex flex-col md:flex-row gap-3 mb-4">
+        <SearchInput value={search} onChange={setSearch} placeholder="Buscar por aluno, responsável ou oficina" label="Buscar fichas" className="flex-1" />
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-            <ClipboardList size={24} style={{ color: 'var(--accent)' }} />
-            Fichas de Matrícula
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            Oficinas Culturais e Escolinhas Esportivas
-          </p>
-        </div>
-        <div className="text-right text-xs" style={{ color: 'var(--text-muted)' }}>
-          <p>{filtered?.length ?? 0} ficha(s)</p>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        {/* Search */}
-        <div className="relative flex-1 min-w-48">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-muted)' }} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por aluno, responsável ou oficina..."
-            className="input pl-10 w-full"
-          />
-        </div>
-
-        {/* Status filter */}
-        <div className="relative">
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            className="input pr-8 appearance-none"
-          >
-            <option value="ALL">Todos os Status</option>
-            <option value="PENDENTE">Pendente</option>
-            <option value="CONFIRMADA">Confirmada</option>
-            <option value="CANCELADA">Cancelada</option>
+          <label htmlFor="enroll-workshop" className="sr-only">Filtrar por oficina</label>
+          <select id="enroll-workshop" value={workshopFilter} onChange={(e) => setWorkshopFilter(e.target.value)} className="input">
+            <option value="ALL">Todas as oficinas</option>
+            {workshops?.map((w) => <option key={w.id} value={w.id}>{w.title}</option>)}
           </select>
-          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
         </div>
+      </div>
 
-        {/* Workshop filter */}
-        <div className="relative">
-          <select
-            value={workshopFilter}
-            onChange={e => setWorkshopFilter(e.target.value)}
-            className="input pr-8 appearance-none"
+      <div className="flex flex-wrap gap-2 mb-6" role="group" aria-label="Filtrar por status">
+        {(['ALL', 'PENDENTE', 'CONFIRMADA', 'CANCELADA'] as StatusFilter[]).map((s) => (
+          <button
+            key={s}
+            type="button"
+            aria-pressed={statusFilter === s}
+            onClick={() => setStatusFilter(s)}
+            className={`badge cursor-pointer transition-all ${statusFilter === s ? (s === 'ALL' ? 'badge-blue' : STATUS_BADGE[s]) : 'badge-slate opacity-60'}`}
           >
-            <option value="ALL">Todas as Oficinas</option>
-            {workshops?.map((ws: any) => (
-              <option key={ws.id} value={ws.id}>{ws.title}</option>
-            ))}
-          </select>
-          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-        </div>
+            {s === 'ALL' ? 'Todas' : STATUS_LABELS[s]} ({counts[s] ?? 0})
+          </button>
+        ))}
       </div>
 
-      {/* Status summary chips */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        {['ALL', 'PENDENTE', 'CONFIRMADA', 'CANCELADA'].map(s => {
-          const count = s === 'ALL'
-            ? enrollments?.length
-            : enrollments?.filter((e: any) => e.status === s).length
-          return (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`badge cursor-pointer transition-all ${statusFilter === s
-                ? s === 'ALL' ? 'badge-blue' : STATUS_BADGE[s] ?? 'badge-amber'
-                : 'badge-slate opacity-60'}`}
-            >
-              {s === 'ALL' ? 'Todas' : STATUS_LABELS[s]} ({count ?? 0})
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3, 4].map(i => (
-            <div key={i} className="h-14 rounded-xl skeleton" />
-          ))}
-        </div>
-      ) : filtered && filtered.length > 0 ? (
-        <div className="rounded-2xl border overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead style={{ background: 'var(--bg-secondary)' }}>
-                <tr>
-                  {['Aluno', 'Oficina/Escolinha', 'Responsável', 'Data', 'Status', 'Ações'].map(h => (
-                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide"
-                      style={{ color: 'var(--text-secondary)' }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((enrollment: any) => (
-                  <tr
-                    key={enrollment.id}
-                    className="border-t transition-colors hover:bg-amber-500/5 cursor-pointer"
-                    style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
-                    onClick={() => { setSelected(enrollment); setAdminNotes(enrollment.admin_notes ?? '') }}
-                  >
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                        {enrollment.student_name}
-                      </p>
-                      {enrollment.age && (
-                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{enrollment.age} anos</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                      {enrollment.workshop_name ?? enrollment.cultural_workshops?.title ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                      <p>{enrollment.guardian_name ?? '—'}</p>
-                      {enrollment.phone && <p style={{ color: 'var(--text-muted)' }}>{enrollment.phone}</p>}
-                    </td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {formatDate(enrollment.created_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`badge text-xs ${STATUS_BADGE[enrollment.status] ?? 'badge-slate'}`}>
-                        {STATUS_LABELS[enrollment.status] ?? enrollment.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={e => { e.stopPropagation(); setSelected(enrollment); setAdminNotes(enrollment.admin_notes ?? '') }}
-                        className="btn btn-ghost text-xs py-1 px-2"
-                        title="Ver detalhes"
-                      >
-                        <Eye size={14} /> Ver
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {enrollmentsQuery.isLoading ? (
+        <SkeletonList rows={4} />
+      ) : enrollmentsQuery.error ? (
+        <ErrorState error={enrollmentsQuery.error} onRetry={() => enrollmentsQuery.refetch()} />
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={ClipboardList} title="Nenhuma ficha encontrada" description={search || statusFilter !== 'ALL' || workshopFilter !== 'ALL' ? 'Tente ajustar os filtros.' : 'As fichas enviadas pelo site aparecerão aqui.'} />
       ) : (
-        <div className="text-center py-20 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
-          <ClipboardList size={48} className="mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
-          <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>Nenhuma ficha encontrada</p>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {search || statusFilter !== 'ALL' ? 'Tente ajustar os filtros' : 'As fichas submetidas aparecerão aqui'}
-          </p>
-        </div>
+        <AdminTable columns={columns} rows={filtered} caption="Fichas de matrícula" onRowClick={openDetail} />
       )}
 
-      {/* Detail Modal */}
-      {selected && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 bg-black/60 backdrop-blur-sm overflow-y-auto">
-          <div
-            className="w-full max-w-2xl rounded-2xl shadow-2xl"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-          >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-              <div>
-                <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
-                  Ficha de Matrícula
-                </h2>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Enviada em {formatDate(selected.created_at)}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => window.print()}
-                  className="btn btn-secondary text-xs py-1.5 gap-1"
-                >
-                  <Printer size={14} /> Imprimir
-                </button>
-                <button
-                  onClick={() => setSelected(null)}
-                  className="p-2 rounded-lg transition-colors hover:bg-red-500/10"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  <X size={18} />
-                </button>
-              </div>
+      <Modal
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        title="Ficha de matrícula"
+        description={selected ? `Enviada em ${formatDateTime(selected.created_at)}` : undefined}
+        size="lg"
+        locked={updateMutation.isPending}
+        footer={selected && (
+          <>
+            <button type="button" onClick={() => window.print()} className="btn btn-secondary mr-auto"><Printer size={14} /> Imprimir</button>
+            {isAdmin ? (
+              <>
+                <LoadingButton type="button" className="btn btn-danger" loading={updateMutation.isPending} disabled={selected.status === 'CANCELADA'} onClick={onCancel}>
+                  <XCircle size={14} /> Cancelar matrícula
+                </LoadingButton>
+                <LoadingButton type="button" className="btn btn-primary" loading={updateMutation.isPending} disabled={selected.status === 'CONFIRMADA'} onClick={() => updateMutation.mutate({ id: selected.id, status: 'CONFIRMADA', notes: adminNotes })}>
+                  <CheckCircle size={14} /> Confirmar matrícula
+                </LoadingButton>
+              </>
+            ) : (
+              <button type="button" className="btn btn-secondary" onClick={() => setSelected(null)}>Fechar</button>
+            )}
+          </>
+        )}
+      >
+        {selected && (
+          <div id="print-modal" className="space-y-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`badge ${STATUS_BADGE[selected.status] ?? 'badge-slate'}`}>{STATUS_LABELS[selected.status] ?? selected.status}</span>
+              {selected.image_authorization && <span className="badge badge-green inline-flex items-center gap-1"><Shield size={12} /> Uso de imagem autorizado</span>}
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto" id="print-modal">
-              {/* Status */}
-              <div className="flex items-center gap-3">
-                <span className={`badge ${STATUS_BADGE[selected.status] ?? 'badge-slate'}`}>
-                  {STATUS_LABELS[selected.status] ?? selected.status}
-                </span>
-                {selected.image_authorization && (
-                  <span className="badge badge-green flex items-center gap-1">
-                    <Shield size={12} /> Imagem Autorizada
-                  </span>
-                )}
-              </div>
-
-              {/* Dados da Inscrição */}
-              <ModalSection icon={<Calendar size={15} />} title="Dados da Inscrição">
-                <DetailGrid>
-                  <DetailItem label="Data da Inscrição" value={selected.enrollment_date ? new Date(selected.enrollment_date + 'T00:00:00').toLocaleDateString('pt-BR') : '—'} />
-                  <DetailItem label="Período" value={selected.period} />
-                  <DetailItem label="Oficina / Escolinha" value={selected.workshop_name} span2 />
-                  <DetailItem label="Instrutor" value={selected.instructor} />
-                  <DetailItem label="Dias e Horários" value={selected.schedule} />
-                  <DetailItem label="Local" value={selected.location} span2 />
-                </DetailGrid>
-              </ModalSection>
-
-              {/* Dados do Aluno */}
-              <ModalSection icon={<User size={15} />} title="Dados do Aluno">
-                <DetailGrid>
-                  <DetailItem label="Nome Completo" value={selected.student_name} span2 />
-                  <DetailItem label="Escola" value={selected.school} span2 />
-                  <DetailItem label="Ano/Série" value={selected.grade} />
-                  <DetailItem label="Período Escolar" value={selected.school_period} />
-                  <DetailItem label="Idade" value={selected.age ? `${selected.age} anos` : undefined} />
-                </DetailGrid>
-              </ModalSection>
-
-              {/* Dados do Responsável */}
-              <ModalSection icon={<Phone size={15} />} title="Dados do Responsável">
-                <DetailGrid>
-                  <DetailItem label="Nome do Responsável" value={selected.guardian_name} span2 />
-                  <DetailItem label="Telefone" value={selected.phone} />
-                  <DetailItem label="Endereço" value={selected.address} span2 />
-                </DetailGrid>
-              </ModalSection>
-
-              {/* Autorização de busca */}
-              <ModalSection icon={<MapPin size={15} />} title="Autorização de Busca">
-                <DetailGrid>
-                  <DetailItem
-                    label="Acompanhado por responsável"
-                    value={selected.accompanied_by_guardian ? 'Sim' : 'Não'}
-                  />
-                  <DetailItem label="Pessoa Autorizada para Buscar" value={selected.authorized_person} span2 />
-                </DetailGrid>
-              </ModalSection>
-
-              {/* Termo de Imagem */}
-              <ModalSection icon={<Shield size={15} />} title="Termo de Imagem e Voz" accent>
-                <DetailGrid>
-                  <DetailItem label="Nome do Responsável (Termo)" value={selected.image_auth_guardian_name} span2 />
-                  <DetailItem label="CPF do Responsável" value={selected.image_auth_guardian_cpf} />
-                  <DetailItem
-                    label="Autorização concedida"
-                    value={selected.image_authorization ? '✓ Sim — Autorizado eletronicamente' : '✗ Não autorizado'}
-                  />
-                </DetailGrid>
-              </ModalSection>
-
-              {/* Admin notes + actions */}
-              <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}>
-                <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
-                  Observações Internas
-                </label>
-                <textarea
-                  value={adminNotes}
-                  onChange={e => setAdminNotes(e.target.value)}
-                  rows={2}
-                  className="input w-full text-sm"
-                  placeholder="Anotações internas sobre esta matrícula..."
-                />
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => updateMutation.mutate({ id: selected.id, status: 'CONFIRMADA', notes: adminNotes })}
-                    disabled={updateMutation.isPending || selected.status === 'CONFIRMADA'}
-                    className="btn btn-primary text-xs py-1.5 gap-1 flex-1"
-                  >
-                    <CheckCircle size={14} /> Confirmar Matrícula
-                  </button>
-                  <button
-                    onClick={() => updateMutation.mutate({ id: selected.id, status: 'CANCELADA', notes: adminNotes })}
-                    disabled={updateMutation.isPending || selected.status === 'CANCELADA'}
-                    className="btn btn-danger text-xs py-1.5 gap-1 flex-1"
-                  >
-                    <XCircle size={14} /> Cancelar Matrícula
-                  </button>
-                </div>
-              </div>
+            <div className="rounded-xl border p-4 print:hidden" style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}>
+              <label htmlFor="enroll-notes" className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-secondary)' }}>Observações internas</label>
+              <textarea
+                id="enroll-notes"
+                value={adminNotes}
+                onChange={(e) => setAdminNotes(e.target.value)}
+                rows={2}
+                className="input w-full text-sm"
+                placeholder="Anotações internas sobre esta matrícula"
+                readOnly={!isAdmin}
+              />
+              {!isAdmin && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Somente administradores podem alterar o status da matrícula.</p>}
             </div>
+
+            <Section icon={<Calendar size={15} />} title="Dados da inscrição">
+              <DetailGrid>
+                <DetailItem label="Data da inscrição" value={formatDate(selected.enrollment_date)} />
+                <DetailItem label="Período" value={selected.period ? PERIOD_LABELS[selected.period] ?? selected.period : null} />
+                <DetailItem label="Oficina / escolinha" value={selected.workshop_name ?? selected.cultural_workshops?.title} span2 />
+                <DetailItem label="Instrutor(a)" value={selected.instructor} />
+                <DetailItem label="Dias e horários" value={selected.schedule} />
+                <DetailItem label="Local" value={selected.location} span2 />
+              </DetailGrid>
+            </Section>
+
+            <Section icon={<User size={15} />} title="Dados do aluno(a)">
+              <DetailGrid>
+                <DetailItem label="Nome completo" value={selected.student_name} span2 />
+                <DetailItem label="Escola" value={selected.school} span2 />
+                <DetailItem label="Ano/série" value={selected.grade} />
+                <DetailItem label="Período escolar" value={selected.school_period} />
+                <DetailItem label="Idade" value={selected.age != null ? `${selected.age} anos` : null} />
+              </DetailGrid>
+            </Section>
+
+            <Section icon={<Phone size={15} />} title="Dados do responsável">
+              <DetailGrid>
+                <DetailItem label="Nome do responsável" value={selected.guardian_name} span2 />
+                <DetailItem label="Telefone" value={selected.phone ? formatPhone(selected.phone) : null} link={whatsappLink(selected.phone)} linkLabel="WhatsApp" />
+                <DetailItem label="Telefone do trabalho" value={selected.guardian_work_phone ? formatPhone(selected.guardian_work_phone) : null} />
+                <DetailItem label="Endereço" value={selected.address} span2 />
+              </DetailGrid>
+            </Section>
+
+            <Section icon={<MapPin size={15} />} title="Autorização de busca">
+              <DetailGrid>
+                <DetailItem label="Acompanhado por responsável" value={selected.accompanied_by_guardian ? 'Sim' : 'Não'} />
+                <DetailItem label="Pessoa autorizada a buscar" value={selected.authorized_person} span2 />
+              </DetailGrid>
+            </Section>
+
+            <Section icon={<Shield size={15} />} title="Termo de uso de imagem e voz" accent>
+              <DetailGrid>
+                <DetailItem label="Nome do responsável (termo)" value={selected.image_auth_guardian_name} span2 />
+                <DetailItem label="CPF do responsável" value={selected.image_auth_guardian_cpf ? formatCPF(selected.image_auth_guardian_cpf) : null} />
+                <DetailItem label="Autorização" value={selected.image_authorization ? 'Concedida eletronicamente' : 'Não autorizado'} />
+              </DetailGrid>
+            </Section>
+
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       <style>{`
         @media print {
-          body > * { display: none !important; }
-          #print-modal { display: block !important; position: fixed; top: 0; left: 0; width: 100%; background: white; color: black; padding: 2rem; }
+          body * { visibility: hidden; }
+          #print-modal, #print-modal * { visibility: visible; }
+          #print-modal { position: absolute; inset: 0; width: 100%; height: auto; overflow: visible; padding: 1.5rem; background: #fff; color: #000; }
         }
       `}</style>
     </div>
   )
 }
 
-// ─── HELPER COMPONENTS ──────────────────────────────────────────────────────
-
-function ModalSection({
-  icon, title, children, accent,
-}: {
-  icon: React.ReactNode
-  title: string
-  children: React.ReactNode
-  accent?: boolean
-}) {
+function Section({ icon, title, children, accent }: { icon: ReactNode; title: string; children: ReactNode; accent?: boolean }) {
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ borderColor: accent ? 'rgba(245,158,11,0.3)' : 'var(--border)' }}>
-      <div
+    <section className="rounded-xl border overflow-hidden" style={{ borderColor: accent ? 'rgba(245,158,11,0.3)' : 'var(--border)' }}>
+      <h3
         className="flex items-center gap-2 px-4 py-2 border-b text-xs font-semibold uppercase tracking-wide"
-        style={{
-          background: accent ? 'rgba(245,158,11,0.08)' : 'var(--bg-secondary)',
-          borderColor: accent ? 'rgba(245,158,11,0.2)' : 'var(--border)',
-          color: 'var(--text-secondary)',
-        }}
+        style={{ background: accent ? 'rgba(245,158,11,0.08)' : 'var(--bg-secondary)', borderColor: accent ? 'rgba(245,158,11,0.2)' : 'var(--border)', color: 'var(--text-secondary)' }}
       >
-        <span style={{ color: 'var(--accent)' }}>{icon}</span>
+        <span style={{ color: 'var(--accent)' }} aria-hidden="true">{icon}</span>
         {title}
-      </div>
-      <div className="p-4" style={{ background: 'var(--bg-card)' }}>
-        {children}
-      </div>
-    </div>
+      </h3>
+      <div className="p-4" style={{ background: 'var(--bg-card)' }}>{children}</div>
+    </section>
   )
 }
 
-function DetailGrid({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-2 gap-x-6 gap-y-3">{children}</div>
+function DetailGrid({ children }: { children: ReactNode }) {
+  return <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">{children}</dl>
 }
 
-function DetailItem({
-  label, value, span2,
-}: {
-  label: string
-  value?: string | null
-  span2?: boolean
-}) {
+function DetailItem({ label, value, span2, link, linkLabel }: { label: string; value?: string | null; span2?: boolean; link?: string | null; linkLabel?: string }) {
   return (
-    <div className={span2 ? 'col-span-2' : ''}>
-      <p className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</p>
-      <p className="text-sm" style={{ color: value ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-        {value ?? '—'}
-      </p>
+    <div className={span2 ? 'sm:col-span-2' : ''}>
+      <dt className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</dt>
+      <dd className="text-sm flex items-center gap-2" style={{ color: value ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+        {value || '—'}
+        {value && link && (
+          <a href={link} target="_blank" rel="noopener noreferrer" className="text-xs font-medium hover:underline print:hidden" style={{ color: 'var(--accent)' }}>{linkLabel ?? 'Abrir'}</a>
+        )}
+      </dd>
     </div>
   )
 }

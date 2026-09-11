@@ -1,93 +1,120 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-import { ShoppingBag, Eye, EyeOff, Star } from 'lucide-react'
+import { ShoppingBag, Eye, EyeOff, Star, ExternalLink } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { useCrud } from '@/hooks/useCrud'
+import { formatDate, safeUrl } from '@/lib/utils'
+import type { CulturalProduct } from '@/types'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonList } from '@/components/ui/Spinner'
+import { AdminTable, IconButton, type AdminColumn } from '@/components/admin/AdminTable'
 
-const PRODUCT_TYPE_LABELS: Record<string, string> = {
-  peca_teatro: 'Peça de Teatro', show: 'Show', album: 'Álbum', livro: 'Livro',
+const PRODUCT_TYPE_LABELS: Record<CulturalProduct['type'], string> = {
+  peca_teatro: 'Peça de teatro', show: 'Show', album: 'Álbum', livro: 'Livro',
   exposicao: 'Exposição', filme: 'Filme', danca: 'Dança', artesanato: 'Artesanato',
-  grafite: 'Grafite', outro: 'Produto Cultural',
+  grafite: 'Grafite', outro: 'Produto cultural',
+}
+
+/** Linha da moderação: produto + nome do agente (novo cadastro) ou do artista (legado). */
+interface ProductRow extends CulturalProduct {
+  artists?: { artistic_name: string | null; profiles?: { full_name: string } | null } | null
+}
+
+function ownerName(p: ProductRow): string {
+  return p.cultural_agents?.display_name ?? p.artists?.artistic_name ?? p.artists?.profiles?.full_name ?? 'Agente não identificado'
 }
 
 export function AdminProducts() {
-  const qc = useQueryClient()
+  const { isAdmin } = useAuth()
 
-  const { data: products, isLoading } = useQuery({
+  const crud = useCrud<ProductRow>({
+    table: 'cultural_products',
     queryKey: ['admin-products'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('cultural_products')
-        .select('*, artists(artistic_name, profiles(full_name))')
-        .order('created_at', { ascending: false })
-      return data ?? []
-    },
+    select: '*, cultural_agents(id, display_name, photo_url), artists(artistic_name, profiles(full_name))',
+    orderBy: ['created_at', false],
+    invalidate: [['public-products'], ['my-products']],
+    successMessage: { save: 'Produto atualizado.' },
   })
 
-  const toggleMutation = useMutation({
-    mutationFn: async ({ id, field, value }: { id: string; field: string; value: boolean }) => {
-      await supabase.from('cultural_products').update({ [field]: value }).eq('id', id)
+  function toggle(p: ProductRow, field: 'is_active' | 'is_featured') {
+    // Envia apenas o campo alterado, nunca a linha inteira (que traz as relações embutidas).
+    crud.save.mutate({ id: p.id, [field]: !p[field] })
+  }
+
+  const columns: AdminColumn<ProductRow>[] = [
+    {
+      key: 'product', header: 'Produto',
+      render: (p) => (
+        <div className="flex items-center gap-3">
+          {p.cover_url ? (
+            <img src={p.cover_url} alt="" className="w-10 h-10 rounded-lg object-cover flex-shrink-0" style={{ background: 'var(--bg-secondary)' }} />
+          ) : (
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--bg-secondary)' }} aria-hidden="true"><ShoppingBag size={16} style={{ color: 'var(--text-muted)' }} /></div>
+          )}
+          <div className="min-w-0">
+            <p className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{p.title}</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Cadastrado em {formatDate(p.created_at)}</p>
+          </div>
+        </div>
+      ),
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-products'] }),
-  })
+    { key: 'owner', header: 'Agente cultural', render: (p) => ownerName(p) },
+    { key: 'type', header: 'Tipo', render: (p) => PRODUCT_TYPE_LABELS[p.type] ?? p.type },
+    { key: 'views', header: 'Visualizações', align: 'right', render: (p) => p.views ?? 0 },
+    {
+      key: 'link', header: 'Link',
+      render: (p) => {
+        const url = safeUrl(p.external_link)
+        return url ? (
+          <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium hover:underline" style={{ color: 'var(--accent)' }}>
+            <ExternalLink size={12} /> Abrir
+          </a>
+        ) : '—'
+      },
+    },
+    {
+      key: 'active', header: 'Ativo', align: 'center',
+      render: (p) => (
+        <IconButton
+          label={p.is_active ? 'Ativo — clique para ocultar do site' : 'Oculto — clique para publicar'}
+          onClick={() => toggle(p, 'is_active')}
+          tone={p.is_active ? 'success' : 'danger'}
+          disabled={!isAdmin || crud.save.isPending}
+        >
+          {p.is_active ? <Eye size={16} /> : <EyeOff size={16} />}
+        </IconButton>
+      ),
+    },
+    {
+      key: 'featured', header: 'Destaque', align: 'center',
+      render: (p) => (
+        <IconButton
+          label={p.is_featured ? 'Em destaque — clique para remover o destaque' : 'Sem destaque — clique para destacar'}
+          onClick={() => toggle(p, 'is_featured')}
+          tone={p.is_featured ? 'primary' : 'neutral'}
+          disabled={!isAdmin || crud.save.isPending}
+        >
+          <Star size={16} className={p.is_featured ? 'fill-current' : ''} />
+        </IconButton>
+      ),
+    },
+  ]
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Produtos Culturais</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Modere os produtos cadastrados pelos artistas</p>
-      </div>
+      <PageHeader
+        icon={ShoppingBag}
+        title="Produtos Culturais"
+        description="Modere os produtos cadastrados pelos agentes culturais: publique, oculte ou destaque."
+      />
 
-      {isLoading ? (
-        <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} />)}</div>
-      ) : products && products.length > 0 ? (
-        <div className="rounded-2xl border overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-          <table className="w-full">
-            <thead style={{ background: 'var(--bg-secondary)' }}>
-              <tr>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Produto</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Artista</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Tipo</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Ativo</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Destaque</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              {products.map((product: any) => (
-                <tr key={product.id} style={{ background: 'var(--bg-card)' }}>
-                  <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{product.title}</td>
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    {(product.artists as any)?.artistic_name ?? (product.artists as any)?.profiles?.full_name}
-                  </td>
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    {PRODUCT_TYPE_LABELS[product.type] ?? product.type}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => toggleMutation.mutate({ id: product.id, field: 'is_active', value: !product.is_active })}
-                      className={`p-1.5 rounded-lg transition-colors ${product.is_active ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'text-red-500 bg-red-50 dark:bg-red-900/20'}`}
-                      title={product.is_active ? 'Ativo — clique para desativar' : 'Inativo — clique para ativar'}
-                    >
-                      {product.is_active ? <Eye size={16} /> : <EyeOff size={16} />}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => toggleMutation.mutate({ id: product.id, field: 'is_featured', value: !product.is_featured })}
-                      className={`p-1.5 rounded-lg transition-colors ${product.is_featured ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/20' : 'text-slate-400 hover:text-amber-500'}`}
-                      title={product.is_featured ? 'Em destaque' : 'Sem destaque'}
-                    >
-                      <Star size={16} className={product.is_featured ? 'fill-current' : ''} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {crud.isLoading ? (
+        <SkeletonList rows={5} />
+      ) : crud.error ? (
+        <ErrorState error={crud.error} onRetry={() => crud.refetch()} />
+      ) : crud.items.length === 0 ? (
+        <EmptyState icon={ShoppingBag} title="Nenhum produto cadastrado" description="Os produtos cadastrados pelos agentes culturais aparecerão aqui para moderação." />
       ) : (
-        <div className="text-center py-16 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
-          <ShoppingBag size={40} className="mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
-          <p style={{ color: 'var(--text-primary)' }}>Nenhum produto cadastrado pelos artistas ainda</p>
-        </div>
+        <AdminTable columns={columns} rows={crud.items} caption="Produtos culturais cadastrados pelos agentes" />
       )}
     </div>
   )

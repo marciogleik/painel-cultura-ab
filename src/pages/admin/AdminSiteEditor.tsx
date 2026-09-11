@@ -1,392 +1,236 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-import { Settings2, ImagePlus, Save, Trash2, GripVertical, X, ArrowUp, ArrowDown } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useMutation } from '@tanstack/react-query'
+import { Settings2, ImagePlus, ArrowUp, ArrowDown, Image as ImageIcon } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
+import { useCrud } from '@/hooks/useCrud'
+import { errorMessage } from '@/lib/utils'
+import { Modal } from '@/components/ui/Modal'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { useToast } from '@/components/ui/Toast'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonList } from '@/components/ui/Spinner'
+import { IconButton, RowActions, BoolBadge } from '@/components/admin/AdminTable'
+import { Field, CheckboxField, FormFooter } from '@/components/admin/Field'
+import { SiteContentForm } from '@/components/admin/SiteContentForm'
 import { ImageUploader } from '@/components/ImageUploader'
 
+interface CarouselSlide {
+  id: string
+  title: string | null
+  subtitle: string | null
+  image_url: string
+  link_url: string | null
+  link_label: string | null
+  sort_order: number
+  is_active: boolean
+  created_at: string
+}
+
+interface SlideForm {
+  title: string
+  subtitle: string
+  image_url: string
+  link_url: string
+  link_label: string
+  is_active: boolean
+}
+
+const DEFAULTS: SlideForm = { title: '', subtitle: '', image_url: '', link_url: '', link_label: '', is_active: true }
+
+const LINK_OPTIONS = [
+  { value: '', label: 'Sem botão' },
+  { value: '/agentes', label: 'Agentes culturais' },
+  { value: '/eventos', label: 'Eventos' },
+  { value: '/espacos', label: 'Espaços culturais' },
+  { value: '/editais', label: 'Editais' },
+  { value: '/projetos', label: 'Projetos' },
+  { value: '/biblioteca', label: 'Biblioteca' },
+  { value: '/oficinas', label: 'Oficinas' },
+  { value: '/simbolos', label: 'Símbolos municipais' },
+]
+
+const SECTION_LABELS: Record<string, string> = {
+  home: 'Página inicial',
+  biblioteca: 'Biblioteca',
+  library: 'Biblioteca',
+  footer: 'Rodapé',
+  geral: 'Geral',
+}
+
+type Tab = 'carousel' | 'content'
+
 export function AdminSiteEditor() {
-  const qc = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'carousel' | 'content'>('carousel')
-  const [carouselModal, setCarouselModal] = useState(false)
-  const [editingSlide, setEditingSlide] = useState<any>(null)
-  // imageUrl controlado manualmente (vem do ImageUploader, não do form)
-  const [imageUrl, setImageUrl] = useState<string>('')
+  const { isAdmin } = useAuth()
+  const confirm = useConfirm()
+  const toast = useToast()
+  const formId = useId()
+  const [tab, setTab] = useState<Tab>('carousel')
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<CarouselSlide | null>(null)
 
-  const { register, handleSubmit, reset } = useForm()
-  const { register: regContent, handleSubmit: handleContent } = useForm()
-
-  // ─── Carousel ────────────────────────────────────────────────────────────
-
-  const { data: slides } = useQuery({
+  const crud = useCrud<CarouselSlide>({
+    table: 'carousel_images',
     queryKey: ['admin-carousel'],
-    queryFn: async () => {
-      const { data } = await supabase.from('carousel_images').select('*').order('sort_order')
-      return data ?? []
+    orderBy: ['sort_order', true],
+    invalidate: [['hero-carousel']],
+    successMessage: { save: 'Slide salvo.', remove: 'Slide excluído.' },
+  })
+  const slides = crud.items
+
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<SlideForm>({ defaultValues: DEFAULTS })
+  const imageUrl = watch('image_url')
+
+  /** Reordena a lista inteira de uma vez, com sort_order normalizado (0..n-1). */
+  const reorder = useMutation({
+    mutationFn: async (ordered: CarouselSlide[]) => {
+      const changed = ordered
+        .map((s, idx) => ({ id: s.id, sort_order: idx }))
+        .filter((s, idx) => ordered[idx].sort_order !== s.sort_order)
+      const results = await Promise.all(changed.map((s) => supabase.from('carousel_images').update({ sort_order: s.sort_order }).eq('id', s.id)))
+      const failed = results.find((r) => r.error)
+      if (failed?.error) throw failed.error
     },
+    onSuccess: () => crud.invalidateAll(),
+    onError: (err) => toast.error(errorMessage(err)),
   })
 
-  const slideMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const payload = { ...data, image_url: imageUrl || data.image_url }
-      if (editingSlide) {
-        await supabase.from('carousel_images').update(payload).eq('id', editingSlide.id)
-      } else {
-        const order = (slides?.length ?? 0)
-        await supabase.from('carousel_images').insert({ ...payload, sort_order: order })
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin-carousel'] })
-      qc.invalidateQueries({ queryKey: ['hero-carousel'] })
-      setCarouselModal(false)
-      setEditingSlide(null)
-      setImageUrl('')
-      reset()
-    },
-  })
-
-  const slideDeleteMutation = useMutation({
-    mutationFn: async (id: string) => supabase.from('carousel_images').delete().eq('id', id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin-carousel'] })
-      qc.invalidateQueries({ queryKey: ['hero-carousel'] })
-    },
-  })
-
-  const slideOrderMutation = useMutation({
-    mutationFn: async ({ id, newOrder }: { id: string; newOrder: number }) => {
-      await supabase.from('carousel_images').update({ sort_order: newOrder }).eq('id', id)
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-carousel'] }),
-  })
-
-  function openSlide(slide?: any) {
-    setEditingSlide(slide ?? null)
-    setImageUrl(slide?.image_url ?? '')
-    reset(slide ?? { is_active: true })
-    setCarouselModal(true)
+  function move(idx: number, dir: -1 | 1) {
+    const target = idx + dir
+    if (target < 0 || target >= slides.length) return
+    const next = [...slides]
+    ;[next[idx], next[target]] = [next[target], next[idx]]
+    reorder.mutate(next)
   }
 
-  function moveSlide(idx: number, direction: 'up' | 'down') {
-    if (!slides) return
-    const slide = slides[idx]
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (swapIdx < 0 || swapIdx >= slides.length) return
-    const swapSlide = slides[swapIdx]
-    slideOrderMutation.mutate({ id: slide.id, newOrder: swapSlide.sort_order })
-    slideOrderMutation.mutate({ id: swapSlide.id, newOrder: slide.sort_order })
+  function openNew() { setEditing(null); reset(DEFAULTS); setOpen(true) }
+  function openEdit(s: CarouselSlide) {
+    setEditing(s)
+    reset({ title: s.title ?? '', subtitle: s.subtitle ?? '', image_url: s.image_url ?? '', link_url: s.link_url ?? '', link_label: s.link_label ?? '', is_active: s.is_active ?? true })
+    setOpen(true)
+  }
+  function close() { setOpen(false) }
+
+  function onSubmit(values: SlideForm) {
+    const sort_order = editing ? editing.sort_order : slides.reduce((max, s) => Math.max(max, s.sort_order ?? 0), -1) + 1
+    crud.save.mutate({ id: editing?.id, ...values, sort_order }, { onSuccess: close })
   }
 
-  // ─── Site Content ────────────────────────────────────────────────────────
-
-  const { data: content } = useQuery({
-    queryKey: ['admin-site-content'],
-    queryFn: async () => {
-      const { data } = await supabase.from('site_content').select('*').order('section').order('key')
-      return data ?? []
-    },
-  })
-
-  const contentMutation = useMutation({
-    mutationFn: async (formData: any) => {
-      const updates = Object.entries(formData).map(([key, value]) => ({
-        key,
-        value: value as string,
-        label: content?.find(c => c.key === key)?.label ?? key,
-        type: 'text',
-        section: key.split('.')[0],
-        updated_at: new Date().toISOString(),
-      }))
-      for (const upd of updates) {
-        await supabase.from('site_content').upsert(upd, { onConflict: 'key' })
-      }
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-site-content'] }),
-  })
-
-  const groupedContent = content?.reduce((acc: any, item: any) => {
-    const section = item.section ?? 'geral'
-    if (!acc[section]) acc[section] = []
-    acc[section].push(item)
-    return acc
-  }, {})
-
-  const SECTION_LABELS: Record<string, string> = {
-    home: '🏠 Página Principal',
-    biblioteca: '📚 Biblioteca',
-    footer: '🦶 Rodapé',
-    geral: '⚙️ Geral',
+  async function onDelete(s: CarouselSlide) {
+    const ok = await confirm({ title: `Excluir o slide "${s.title || 'sem título'}"?`, message: 'O slide sai do carrossel da página inicial.', danger: true, confirmLabel: 'Excluir' })
+    if (ok) crud.remove.mutate(s.id)
   }
-
-  // Links amigáveis para o seletor de destino do botão
-  const LINK_OPTIONS = [
-    { value: '/artistas', label: '🎨 Artistas' },
-    { value: '/eventos', label: '📅 Eventos' },
-    { value: '/espacos', label: '🏛️ Espaços Culturais' },
-    { value: '/editais', label: '📋 Editais' },
-    { value: '/projetos', label: '🚀 Projetos' },
-    { value: '/biblioteca', label: '📚 Biblioteca' },
-    { value: '/oficinas', label: '🎓 Oficinas' },
-    { value: '/simbolos', label: '🏁 Símbolos Municipais' },
-    { value: '', label: '— Sem botão —' },
-  ]
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-          <Settings2 size={24} style={{ color: 'var(--accent)' }} />
-          Editor do Site
-        </h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-          Edite o carrossel e todos os textos do site — sem precisar de programação
-        </p>
-      </div>
+      <PageHeader
+        icon={Settings2}
+        title="Editor do Site"
+        description="Carrossel da página inicial e textos editáveis do site."
+        actions={tab === 'carousel' && isAdmin && <button type="button" onClick={openNew} className="btn btn-primary"><ImagePlus size={16} /> Novo slide</button>}
+      />
 
-      {/* Tabs */}
-      <div className="flex gap-1 p-1 rounded-xl mb-8 w-fit" style={{ background: 'var(--bg-secondary)' }}>
-        {([['carousel', '🖼️ Carrossel'], ['content', '✏️ Textos do Site']] as const).map(([tab, label]) => (
+      <div role="tablist" aria-label="Seções do editor" className="flex gap-1 p-1 rounded-xl mb-6 w-fit" style={{ background: 'var(--bg-secondary)' }}>
+        {([['carousel', 'Carrossel'], ['content', 'Textos do site']] as const).map(([id, label]) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab ? 'shadow-sm' : ''}`}
-            style={activeTab === tab
-              ? { background: 'var(--bg-card)', color: 'var(--text-primary)' }
-              : { color: 'var(--text-secondary)' }
-            }
+            key={id}
+            role="tab"
+            type="button"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === id ? 'shadow-sm' : ''}`}
+            style={tab === id ? { background: 'var(--bg-card)', color: 'var(--text-primary)' } : { color: 'var(--text-secondary)' }}
           >
             {label}
           </button>
         ))}
       </div>
 
-      {/* ── Carousel Tab ── */}
-      {activeTab === 'carousel' && (
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Slides do Carrossel</h2>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                Arraste para reordenar · clique em ✏️ para editar · use + para adicionar novo slide
-              </p>
-            </div>
-            <button onClick={() => openSlide()} className="btn btn-primary">
-              <ImagePlus size={16} /> Novo Slide
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {slides?.map((slide: any, idx: number) => (
-              <div
-                key={slide.id}
-                className="flex items-center gap-4 p-4 rounded-2xl border"
-                style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
-              >
-                <GripVertical size={16} style={{ color: 'var(--text-muted)' }} className="flex-shrink-0" />
-                {/* Thumbnail */}
-                <div className="w-24 h-14 rounded-xl overflow-hidden flex-shrink-0 relative" style={{ background: 'var(--bg-secondary)' }}>
-                  {slide.image_url
-                    ? <img src={slide.image_url} alt="" className="w-full h-full object-cover" />
-                    : <div className="w-full h-full flex items-center justify-center text-2xl">🖼️</div>
-                  }
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>{slide.title ?? 'Slide sem título'}</p>
-                  <p className="text-xs truncate mt-0.5" style={{ color: 'var(--text-secondary)' }}>{slide.subtitle ?? '—'}</p>
-                </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${slide.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
-                  {slide.is_active ? 'Ativo' : 'Inativo'}
-                </span>
-                <div className="flex gap-1 flex-shrink-0">
-                  <button onClick={() => moveSlide(idx, 'up')} disabled={idx === 0} className="p-1.5 rounded disabled:opacity-30" style={{ color: 'var(--text-secondary)' }}><ArrowUp size={14} /></button>
-                  <button onClick={() => moveSlide(idx, 'down')} disabled={idx === (slides.length - 1)} className="p-1.5 rounded disabled:opacity-30" style={{ color: 'var(--text-secondary)' }}><ArrowDown size={14} /></button>
-                  <button onClick={() => openSlide(slide)} className="p-1.5 rounded text-amber-600 hover:bg-amber-50">✏️</button>
-                  <button onClick={() => { if (confirm('Excluir este slide?')) slideDeleteMutation.mutate(slide.id) }} className="p-1.5 rounded text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
-                </div>
-              </div>
-            ))}
-
-            {!slides?.length && (
-              <div className="text-center py-12 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
-                <ImagePlus size={40} className="mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
-                <p style={{ color: 'var(--text-primary)' }}>Nenhum slide cadastrado</p>
-                <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Clique em "Novo Slide" para adicionar fotos ao carrossel</p>
-              </div>
-            )}
-          </div>
-        </div>
+      {tab === 'carousel' && (
+        <section aria-label="Slides do carrossel">
+          {crud.isLoading ? (
+            <SkeletonList rows={3} />
+          ) : crud.error ? (
+            <ErrorState error={crud.error} onRetry={() => crud.refetch()} />
+          ) : slides.length === 0 ? (
+            <EmptyState icon={ImageIcon} title="Nenhum slide cadastrado" description="Adicione fotos ao carrossel da página inicial." action={isAdmin && <button type="button" onClick={openNew} className="btn btn-primary"><ImagePlus size={16} /> Novo slide</button>} />
+          ) : (
+            <ol className="space-y-3">
+              {slides.map((slide, idx) => (
+                <li key={slide.id} className="card flex items-center gap-4 p-4">
+                  <span className="w-6 text-center text-xs font-bold" style={{ color: 'var(--text-muted)' }} aria-label={`Posição ${idx + 1}`}>{idx + 1}</span>
+                  <div className="w-24 h-14 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
+                    {slide.image_url ? <img src={slide.image_url} alt="" className="w-full h-full object-cover" /> : <ImageIcon size={20} style={{ color: 'var(--text-muted)' }} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>{slide.title || 'Slide sem título'}</p>
+                    <p className="text-xs truncate mt-0.5" style={{ color: 'var(--text-secondary)' }}>{slide.subtitle || '—'}</p>
+                  </div>
+                  <BoolBadge value={slide.is_active} yes="Ativo" no="Inativo" />
+                  <RowActions canWrite={isAdmin} onEdit={() => openEdit(slide)} onDelete={() => onDelete(slide)}>
+                    {isAdmin && (
+                      <>
+                        <IconButton label="Mover para cima" onClick={() => move(idx, -1)} disabled={idx === 0 || reorder.isPending}><ArrowUp size={14} /></IconButton>
+                        <IconButton label="Mover para baixo" onClick={() => move(idx, 1)} disabled={idx === slides.length - 1 || reorder.isPending}><ArrowDown size={14} /></IconButton>
+                      </>
+                    )}
+                  </RowActions>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
       )}
 
-      {/* ── Content Tab ── */}
-      {activeTab === 'content' && (
-        <div>
+      {tab === 'content' && (
+        <section aria-label="Textos do site">
           <p className="text-sm mb-6 p-3 rounded-xl" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-            💡 Edite qualquer texto abaixo e clique em <strong>Salvar todas as alterações</strong>. As mudanças aparecem instantaneamente no site.
+            Edite os textos abaixo e clique em <strong>Salvar textos</strong>. As alterações aparecem no site imediatamente.
           </p>
-
-          <form onSubmit={handleContent(data => contentMutation.mutate(data))} className="space-y-8">
-            {groupedContent && Object.entries(groupedContent).map(([section, items]: [string, any]) => (
-              <div key={section} className="rounded-2xl border overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                <div className="px-5 py-3 text-sm font-bold" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
-                  {SECTION_LABELS[section] ?? section}
-                </div>
-                <div className="p-5 space-y-4">
-                  {items.map((item: any) => (
-                    <div key={item.key}>
-                      <label className="label">{item.label}</label>
-                      {item.value && item.value.length > 100 ? (
-                        <textarea
-                          {...regContent(item.key)}
-                          defaultValue={item.value ?? ''}
-                          className="input w-full"
-                          rows={3}
-                        />
-                      ) : (
-                        <input
-                          {...regContent(item.key)}
-                          defaultValue={item.value ?? ''}
-                          className="input w-full"
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            <div className="sticky bottom-4">
-              <button type="submit" disabled={contentMutation.isPending} className="btn btn-primary w-full py-3 text-base shadow-lg">
-                <Save size={18} />
-                {contentMutation.isPending ? 'Salvando...' : '💾 Salvar todas as alterações'}
-              </button>
-              {contentMutation.isSuccess && (
-                <p className="text-center text-sm text-emerald-600 mt-2">✅ Salvo com sucesso!</p>
-              )}
-            </div>
-          </form>
-        </div>
+          <SiteContentForm grouped sectionLabels={SECTION_LABELS} canWrite={isAdmin} />
+        </section>
       )}
 
-      {/* ═══ Modal de Edição do Slide ═══ */}
-      {carouselModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl p-6 max-h-[92vh] overflow-y-auto" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                  {editingSlide ? '✏️ Editar Slide' : '➕ Novo Slide'}
-                </h2>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                  Preencha as informações do slide do carrossel
-                </p>
-              </div>
-              <button onClick={() => setCarouselModal(false)} style={{ color: 'var(--text-muted)' }}>
-                <X size={18} />
-              </button>
+      <Modal
+        open={open}
+        onClose={close}
+        title={editing ? 'Editar slide' : 'Novo slide'}
+        description="Foto, título e botão exibidos no carrossel da página inicial."
+        locked={crud.save.isPending}
+        footer={<FormFooter formId={formId} onCancel={close} loading={crud.save.isPending} canWrite={isAdmin} submitLabel="Salvar slide" disabled={!imageUrl} />}
+      >
+        <form id={formId} onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          <fieldset disabled={!isAdmin} className="space-y-4 min-w-0">
+            <div>
+              <p className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Foto do slide <span aria-hidden="true" style={{ color: 'var(--error)' }}>*</span></p>
+              <input type="hidden" {...register('image_url', { required: 'Envie uma foto para o slide.' })} />
+              <ImageUploader label="Foto do slide" currentUrl={imageUrl || null} folder="carousel" onUpload={(url) => setValue('image_url', url, { shouldDirty: true, shouldValidate: true })} />
+              {errors.image_url && <p role="alert" className="text-xs mt-1" style={{ color: 'var(--error)' }}>{errors.image_url.message}</p>}
             </div>
-
-            <form onSubmit={handleSubmit(data => slideMutation.mutate(data))} className="space-y-5">
-
-              {/* ── Foto (upload simplificado) ── */}
-              <div>
-                <label className="label text-base font-semibold mb-2 block">
-                  📸 Foto do Slide
-                </label>
-                <ImageUploader
-                  currentUrl={imageUrl || undefined}
-                  folder="carousel"
-                  onUpload={(url) => setImageUrl(url)}
-                />
-              </div>
-
-              {/* ── Título ── */}
-              <div>
-                <label className="label">Título <span className="text-red-500">*</span></label>
-                <input
-                  {...register('title', { required: true })}
-                  className="input w-full"
-                  placeholder="Ex: Balé e Dança"
-                />
-              </div>
-
-              {/* ── Subtítulo ── */}
-              <div>
-                <label className="label">Subtítulo</label>
-                <input
-                  {...register('subtitle')}
-                  className="input w-full"
-                  placeholder="Ex: Arte em movimento — espetáculos que encantam"
-                />
-              </div>
-
-              {/* ── Destino do botão (dropdown amigável) ── */}
-              <div>
-                <label className="label">🔗 Para onde leva o botão?</label>
-                <select {...register('link_url')} className="input w-full">
-                  {LINK_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* ── Texto do botão ── */}
-              <div>
-                <label className="label">Texto do Botão</label>
-                <input
-                  {...register('link_label')}
-                  className="input w-full"
-                  placeholder="Ex: Ver Artistas"
-                />
-              </div>
-
-              {/* ── Ativo ── */}
-              <div
-                className="flex items-center justify-between p-4 rounded-xl cursor-pointer"
-                style={{ background: 'var(--bg-secondary)' }}
-                onClick={() => {
-                  const el = document.getElementById('slide_active') as HTMLInputElement
-                  if (el) el.click()
-                }}
-              >
-                <div>
-                  <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Slide ativo</p>
-                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Slide inativo não aparece no site</p>
-                </div>
-                <input
-                  {...register('is_active')}
-                  type="checkbox"
-                  id="slide_active"
-                  defaultChecked={editingSlide?.is_active ?? true}
-                  className="w-5 h-5 accent-amber-500"
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </div>
-
-              {/* Aviso se não tem foto */}
-              {!imageUrl && (
-                <p className="text-xs p-3 rounded-xl" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-                  ⚠️ Adicione uma foto para o slide. Você pode selecionar do seu computador, celular ou câmera.
-                </p>
-              )}
-
-              {/* ── Ações ── */}
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setCarouselModal(false)} className="btn btn-secondary flex-1">
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={slideMutation.isPending || !imageUrl}
-                  className="btn btn-primary flex-1"
-                >
-                  {slideMutation.isPending ? '⏳ Salvando...' : '✅ Salvar slide'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <Field label="Título" required error={errors.title?.message}>
+              {(p) => <input {...p} {...register('title', { required: 'Informe o título do slide.' })} className="input w-full" placeholder="Ex.: Balé e Dança" />}
+            </Field>
+            <Field label="Subtítulo">
+              {(p) => <input {...p} {...register('subtitle')} className="input w-full" placeholder="Ex.: Arte em movimento" />}
+            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Destino do botão">
+                {(p) => (
+                  <select {...p} {...register('link_url')} className="input w-full">
+                    {LINK_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                )}
+              </Field>
+              <Field label="Texto do botão">
+                {(p) => <input {...p} {...register('link_label')} className="input w-full" placeholder="Ex.: Ver agentes" />}
+              </Field>
+            </div>
+            <CheckboxField label="Slide ativo" hint="Slides inativos não aparecem no site." {...register('is_active')} />
+          </fieldset>
+        </form>
+      </Modal>
     </div>
   )
 }

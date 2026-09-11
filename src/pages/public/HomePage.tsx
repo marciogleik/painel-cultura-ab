@@ -1,656 +1,487 @@
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { getMyAgents } from '@/services/culturalAgentService'
+import { countPublicAgents, getPublicAgents } from '@/services/culturalAgentService'
+import { errorMessage } from '@/lib/utils'
+import { ErrorState } from '@/components/ui/EmptyState'
 import {
-  Users, User, ArrowRight, Star, Sparkles, Mic2,
-  ChevronLeft, ChevronRight, Building2, Calendar, BookOpen,
-  Trophy, Wrench, Flag, ShoppingBag, GraduationCap
+  Users, Building2, Calendar, FileText, Search, MapPin, ArrowRight,
+  Lock, LogIn, LogOut, Phone, Map
 } from 'lucide-react'
 
-// ── Carousel ──────────────────────────────────────────────────────────────────
+// ── 4 Botões Principais no Estilo SMIIC (Cápsulas Azuis com Ícone em Círculo) ──
 
-// Slides padrão usados como fallback quando não há dados no banco
-const FALLBACK_SLIDES = [
+const SMIIC_MODULES = [
   {
-    image_url: '/carousel-ballet.jpg',
-    title: 'Balé e Dança',
-    subtitle: 'Arte em movimento — espetáculos que encantam',
-    link_url: '/artistas',
-    link_label: 'Ver Artistas',
-  },
-  {
-    image_url: '/carousel-teatro.jpg',
-    title: 'Teatro',
-    subtitle: 'O palco da cultura e da expressão popular',
-    link_url: '/espacos',
-    link_label: 'Espaços Culturais',
-  },
-  {
-    image_url: '/carousel-musicos.jpg',
-    title: 'Música',
-    subtitle: 'Violeiros, cantores, bandas e muito mais',
-    link_url: '/artistas',
-    link_label: 'Descobrir Artistas',
-  },
-  {
-    image_url: '/carousel-capoeira.jpg',
-    title: 'Capoeira',
-    subtitle: 'Cultura viva, raízes brasileiras em movimento',
-    link_url: '/artistas',
-    link_label: 'Ver Artistas',
-  },
-]
-
-function HeroCarousel() {
-  const [current, setCurrent] = useState(0)
-  const [isAnimating, setIsAnimating] = useState(false)
-
-  // Busca slides dinâmicos do banco de dados
-  const { data: dbSlides } = useQuery({
-    queryKey: ['hero-carousel'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('carousel_images')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order')
-      return data ?? []
-    },
-  })
-
-  // Usa slides do banco se disponíveis, senão usa fallback
-  const slides = (dbSlides && dbSlides.length > 0) ? dbSlides : FALLBACK_SLIDES
-
-  const go = useCallback((idx: number) => {
-    if (isAnimating) return
-    setIsAnimating(true)
-    setCurrent(idx)
-    setTimeout(() => setIsAnimating(false), 600)
-  }, [isAnimating])
-
-  const prev = () => go((current - 1 + slides.length) % slides.length)
-  const next = useCallback(() => go((current + 1) % slides.length), [current, go, slides.length])
-
-  useEffect(() => {
-    // Reset para o primeiro slide se o número de slides mudar
-    setCurrent(0)
-  }, [slides.length])
-
-  useEffect(() => {
-    const interval = setInterval(next, 5000)
-    return () => clearInterval(interval)
-  }, [next])
-
-  const slide = slides[current] ?? slides[0]
-  if (!slide) return null
-
-  return (
-    <div className="relative overflow-hidden" style={{ height: '520px' }}>
-      {/* Background image with overlay */}
-      <div
-        className="absolute inset-0 bg-cover bg-center transition-all duration-700"
-        style={{ backgroundImage: `url(${slide.image_url})` }}
-      />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-
-      {/* Content */}
-      <div className="relative h-full mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center">
-        <div className="max-w-xl">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-4 text-amber-300 border border-amber-500/40 bg-amber-500/10">
-            <Sparkles className="h-3.5 w-3.5" />
-            SMIIC · Água Boa - MT
-          </div>
-          <h2
-            className="text-4xl sm:text-5xl font-bold text-white mb-3 leading-tight"
-            style={{ textShadow: '0 2px 12px rgba(0,0,0,0.5)' }}
-          >
-            {slide.title}
-          </h2>
-          <p className="text-lg text-white/80 mb-6">{slide.subtitle}</p>
-          {slide.link_url && (
-            <Link
-              to={slide.link_url}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white transition-all"
-              style={{ background: 'var(--accent)', boxShadow: '0 4px 20px rgba(217,119,6,0.4)' }}
-            >
-              {slide.link_label || 'Saiba mais'}
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          )}
-        </div>
-      </div>
-
-      {/* Arrows */}
-      <button
-        onClick={prev}
-        className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white transition-all"
-        aria-label="Anterior"
-      >
-        <ChevronLeft size={22} />
-      </button>
-      <button
-        onClick={next}
-        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white transition-all"
-        aria-label="Próximo"
-      >
-        <ChevronRight size={22} />
-      </button>
-
-      {/* Dots */}
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex gap-2">
-        {slides.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => go(i)}
-            className={`rounded-full transition-all ${i === current ? 'w-8 h-2.5 bg-amber-400' : 'w-2.5 h-2.5 bg-white/50 hover:bg-white/80'}`}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ── 8 Módulos Culturais ────────────────────────────────────────────────────────
-
-const MODULES = [
-  {
-    icon: Users,
-    label: 'Agentes Culturais',
+    title: 'Agentes Culturais',
     desc: 'Artistas, músicos, atores e criadores',
-    link: '/artistas',
-    color: '#1d4ed8',
-    bg: '#eff6ff',
+    icon: Users,
+    href: '/agentes',
   },
   {
+    title: 'Projetos Culturais',
+    desc: 'Editais, concursos e fomento cultural',
+    icon: FileText,
+    href: '/editais',
+  },
+  {
+    title: 'Espaços Culturais',
+    desc: 'Teatros, museus, bibliotecas e centros',
     icon: Building2,
-    label: 'Espaços Culturais',
-    desc: 'Teatros, museus e centros culturais',
-    link: '/espacos',
-    color: '#7c3aed',
-    bg: '#f5f3ff',
+    href: '/espacos',
   },
   {
+    title: 'Eventos Culturais',
+    desc: 'Shows, apresentações e agenda da cidade',
     icon: Calendar,
-    label: 'Eventos Culturais',
-    desc: 'Shows, peças e festivais',
-    link: '/eventos',
-    color: '#059669',
-    bg: '#f0fdf4',
-  },
-  {
-    icon: GraduationCap,
-    label: 'Projetos Culturais',
-    desc: 'Iniciativas e programas culturais',
-    link: '/projetos',
-    color: '#d97706',
-    bg: '#fffbeb',
-  },
-  {
-    icon: BookOpen,
-    label: 'Biblioteca Pública',
-    desc: 'Acervo, horários e informações',
-    link: '/biblioteca',
-    color: '#0891b2',
-    bg: '#ecfeff',
-  },
-  {
-    icon: Trophy,
-    label: 'Concursos Culturais',
-    desc: 'Editais e oportunidades abertas',
-    link: '/concursos',
-    color: '#dc2626',
-    bg: '#fef2f2',
-  },
-  {
-    icon: Wrench,
-    label: 'Oficinas Culturais',
-    desc: 'Cursos, workshops e capacitações',
-    link: '/oficinas',
-    color: '#9333ea',
-    bg: '#faf5ff',
-  },
-  {
-    icon: Flag,
-    label: 'Símbolos Municipais',
-    desc: 'Bandeira, brasão, hino e patrimônio',
-    link: '/simbolos',
-    color: '#0f766e',
-    bg: '#f0fdfa',
+    href: '/eventos',
   },
 ]
 
 export function HomePage() {
-  const { user } = useAuth()
+  const { user, profile, signIn, signOut } = useAuth()
+  const navigate = useNavigate()
 
-  const { data: myAgents } = useQuery({
-    queryKey: ['my-agents', user?.id],
-    queryFn: () => getMyAgents(user!.id),
-    enabled: !!user,
-  })
-  const hasAgent = (myAgents?.length ?? 0) > 0
+  // Estado da Busca
+  const [searchTerm, setSearchTerm] = useState('')
 
-  const { data: stats } = useQuery({
-    queryKey: ['home-stats'],
-    queryFn: async () => {
-      const [agents, artists, editais, categories] = await Promise.all([
-        supabase.from('cultural_agents').select('*', { count: 'exact', head: true }).eq('is_public', true).eq('registration_status', 'aprovado'),
-        supabase.from('artists').select('*', { count: 'exact', head: true }).eq('is_public', true),
-        supabase.from('editais').select('*', { count: 'exact', head: true }).eq('status', 'PUBLICADO'),
-        supabase.from('categories').select('*', { count: 'exact', head: true }),
-      ])
-      return {
-        artists: (agents.count ?? 0) + (artists.count ?? 0),
-        editais: editais.count ?? 0,
-        categories: categories.count ?? 0,
+  // Estado do Login Direto na Sidebar
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginError, setLoginError] = useState('')
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (searchTerm.trim()) {
+      navigate(`/agentes?q=${encodeURIComponent(searchTerm.trim())}`)
+    } else {
+      navigate('/agentes')
+    }
+  }
+
+  async function handleSidebarLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!loginEmail || !loginPassword) {
+      setLoginError('Informe seu e-mail e senha.')
+      return
+    }
+    setIsLoggingIn(true)
+    setLoginError('')
+    try {
+      await signIn(loginEmail.trim(), loginPassword)
+      navigate('/painel')
+    } catch (err) {
+      const raw = errorMessage(err, 'Erro ao entrar. Tente novamente.')
+      const msg = raw.toLowerCase()
+      if (msg.includes('invalid login credentials') || msg.includes('invalid credentials')) {
+        setLoginError('E-mail ou senha incorretos.')
+      } else {
+        setLoginError(raw)
       }
+    } finally {
+      setIsLoggingIn(false)
+    }
+  }
+
+  // Textos institucionais editáveis (site_content), com fallback para os textos padrão
+  const { data: siteTexts } = useQuery({
+    queryKey: ['site_content', 'home'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('site_content')
+        .select('key, value')
+        .in('key', ['home.hero.title', 'home.hero.subtitle', 'home.hero.description', 'home.about.title', 'home.about.text'])
+      if (error) throw error
+      const map: Record<string, string> = {}
+      for (const row of (data ?? []) as { key: string; value: string | null }[]) {
+        if (row.value?.trim()) map[row.key] = row.value
+      }
+      return map
     },
+    staleTime: 5 * 60 * 1000,
+  })
+  const heroTitle = siteTexts?.['home.hero.title'] ?? 'BEM-VINDO AO PORTAL SMIIC'
+  const heroSubtitle = siteTexts?.['home.hero.subtitle'] ?? 'Sistema Municipal de Informações e Indicadores Culturais de Água Boa'
+  const heroDescription = siteTexts?.['home.hero.description'] ?? null
+
+  // Estatísticas (somente agentes públicos aprovados, via view pública)
+  const { data: agentCount } = useQuery({
+    queryKey: ['home-stats', 'public-agents'],
+    queryFn: countPublicAgents,
+    staleTime: 60 * 1000,
   })
 
-  const { data: featuredArtists } = useQuery({
-    queryKey: ['featured-artists'],
+  // Agentes Culturais em Destaque (os 6 mais recentes)
+  const {
+    data: featuredAgents,
+    isLoading: isLoadingAgents,
+    isError: isAgentsError,
+    error: agentsError,
+    refetch: refetchAgents,
+  } = useQuery({
+    queryKey: ['home-featured-agents'],
     queryFn: async () => {
-      // Prioriza agentes culturais oficiais do SMIIC
-      const { data: agents } = await supabase
-        .from('cultural_agents')
-        .select('id, display_name, legal_name, photo_url, agent_addresses(city), agent_typologies(cultural_typologies(name))')
-        .eq('is_public', true)
-        .eq('registration_status', 'aprovado')
-        .limit(6)
-
-      if (agents && agents.length > 0) {
-        return agents.map((a: any) => ({
-          id: a.id,
-          artistic_name: a.display_name || a.legal_name,
-          photo_url: a.photo_url,
-          city: a.agent_addresses?.[0]?.city ?? a.agent_addresses?.city ?? 'Água Boa',
-          category_label: a.agent_typologies?.[0]?.cultural_typologies?.name ?? 'Agente Cultural (SMIIC)',
-        }))
-      }
-
-      // Fallback legado se não houver agentes SMIIC cadastrados
-      const { data: legacy } = await supabase
-        .from('artists')
-        .select('id, artistic_name, photo_url, city, categories(name, icon), profiles(full_name)')
-        .eq('is_public', true)
-        .eq('status', 'ATIVO')
-        .limit(6)
-
-      return (legacy ?? []).map((art: any) => ({
-        id: art.id,
-        artistic_name: art.artistic_name || art.profiles?.full_name,
-        photo_url: art.photo_url,
-        city: art.city || 'Água Boa',
-        category_label: art.categories?.name ?? 'Artista',
+      const res = await getPublicAgents({ pageSize: 6 })
+      return res.data.map((a) => ({
+        id: a.id,
+        name: a.display_name || 'Agente Cultural',
+        photo_url: a.photo_url,
+        neighborhood: a.neighborhood,
+        city: a.city || 'Água Boa',
+        typology: a.typologies?.[0]?.cultural_typologies?.name || a.areas?.[0]?.categories?.name || 'Cultura',
       }))
     },
   })
 
-  const { data: featuredProducts } = useQuery({
-    queryKey: ['featured-products'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('cultural_products')
-        .select('id, title, type, cover_url, description, artists(artistic_name, photo_url)')
-        .eq('is_active', true)
-        .eq('is_featured', true)
-        .limit(4)
-      return data ?? []
-    },
-  })
-
-  const { data: upcomingEvents } = useQuery({
-    queryKey: ['upcoming-events'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('cultural_events')
-        .select('id, title, type, start_date, location, cover_url, is_free')
-        .eq('is_active', true)
-        .gte('start_date', new Date().toISOString())
-        .order('start_date')
-        .limit(3)
-      return data ?? []
-    },
-  })
-
-  const PRODUCT_TYPE_LABELS: Record<string, string> = {
-    peca_teatro: 'Peça de Teatro',
-    show: 'Show',
-    album: 'Álbum',
-    livro: 'Livro',
-    exposicao: 'Exposição',
-    filme: 'Filme',
-    danca: 'Dança',
-    artesanato: 'Artesanato',
-    grafite: 'Grafite',
-    outro: 'Produto Cultural',
-  }
-
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      {/* ── LAYOUT 2 COLUNAS (PADRÃO SMIIC CAMPO GRANDE, DESIGN ELEGANTE) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
-      {/* ── Carrossel Hero ── */}
-      <HeroCarousel />
+        {/* ── COLUNA ESQUERDA: BEM-VINDO + 4 BOTÕES + VITRINE DE AGENTES ── */}
+        <div className="lg:col-span-8 space-y-8">
 
-      {/* ── Stats bar ── */}
-      <div style={{ background: 'var(--bg-inst-header)', borderBottom: '1px solid var(--border-inst-header)' }}>
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-16">
-            {[
-              { value: stats?.artists ?? 0, label: 'Agentes Culturais' },
-              { value: stats?.editais ?? 0, label: 'Editais Abertos' },
-              { value: stats?.categories ?? 0, label: 'Categorias' },
-            ].map(({ value, label }) => (
-              <div key={label} className="text-center">
-                <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>{value}</p>
-                <p className="text-xs font-medium" style={{ color: 'var(--text-inst-subtitle)' }}>{label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── 8 Módulos Culturais ── */}
-      <section className="py-14 px-4 sm:px-6 lg:px-8 mx-auto max-w-7xl">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold mb-3 border" style={{ color: 'var(--accent)', borderColor: 'var(--accent)', background: 'var(--bg-secondary)' }}>
-            <Sparkles className="h-3 w-3" />
-            SMIIC · Sistema Municipal de Informações e Indicadores Culturais
-          </div>
-          <h2 className="text-3xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-            Módulos Culturais
-          </h2>
-          <p className="text-base" style={{ color: 'var(--text-secondary)' }}>
-            Acesse todos os serviços da plataforma municipal de cultura
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {MODULES.map(({ icon: Icon, label, desc, link, color, bg }) => (
-            <Link
-              key={link}
-              to={link}
-              className="group flex flex-col items-center text-center p-5 rounded-2xl border transition-all hover:shadow-lg hover:-translate-y-1"
-              style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
-            >
-              <div
-                className="flex h-14 w-14 items-center justify-center rounded-2xl mb-3 transition-transform group-hover:scale-110"
-                style={{ background: bg, border: `2px solid ${color}20` }}
-              >
-                <Icon size={26} style={{ color }} />
-              </div>
-              <p className="text-sm font-bold leading-tight mb-1" style={{ color: 'var(--text-primary)' }}>
-                {label}
-              </p>
-              <p className="text-xs leading-snug hidden sm:block" style={{ color: 'var(--text-secondary)' }}>
-                {desc}
-              </p>
-            </Link>
-          ))}
-        </div>
-
-        {/* CTA Cadastro de Agente Cultural */}
-        <div className="mt-10 relative overflow-hidden rounded-3xl" style={{
-          background: 'linear-gradient(135deg, #7c3aed 0%, #f59e0b 100%)',
-        }}>
-          <div className="absolute inset-0 opacity-10"
-            style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, white 0%, transparent 50%), radial-gradient(circle at 80% 20%, white 0%, transparent 40%)' }}
-          />
-          <div className="relative flex flex-col sm:flex-row items-center justify-between gap-6 p-8">
-            <div className="text-center sm:text-left">
-              <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-white/70 mb-2">
-                <Mic2 className="h-3 w-3" />
-                Você é artista, músico, ator, dançarino, artesão?
-              </span>
-              <h3 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight mb-1">
-                Cadastre-se como<br />Agente Cultural
-              </h3>
-              <p className="text-sm text-white/80 max-w-sm">
-                Apareça no Mapa Cultural da cidade, acesse editais e conecte-se com a Secretaria de Cultura.
-              </p>
-            </div>
-            <Link
-              to="/painel/agentes/novo"
-              id="btn-cadastro-agente-cultural"
-              className="flex-shrink-0 inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-extrabold transition-all hover:scale-105 active:scale-95 shadow-xl"
-              style={{ background: '#ffffff', color: '#7c3aed' }}
-            >
-              <Users className="h-5 w-5" />
-              Fazer meu Cadastro
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Produtos Culturais em Destaque ── */}
-      <section className="py-14" style={{ background: 'var(--bg-secondary)' }}>
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-
-          <div className="flex items-end justify-between mb-8">
-            <div>
-              <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                <ShoppingBag className="inline-block mr-2 text-amber-500" size={22} />
-                Produtos Culturais
-              </h2>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-                Peças, shows, álbuns e obras dos nossos artistas
-              </p>
-            </div>
-            <Link
-              to="/produtos"
-              className="hidden sm:flex items-center gap-1 text-sm font-semibold transition-colors"
-              style={{ color: 'var(--accent)' }}
-            >
-              Ver todos
-              <ArrowRight size={16} />
-            </Link>
-          </div>
-
-          {featuredProducts && featuredProducts.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {featuredProducts.map((product: any) => (
-                <div
-                  key={product.id}
-                  className="group rounded-2xl overflow-hidden border transition-all hover:shadow-lg hover:-translate-y-1"
-                  style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
-                >
-                  <div className="aspect-[4/3] bg-gradient-to-br from-amber-100 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 overflow-hidden">
-                    {product.cover_url ? (
-                      <img src={product.cover_url} alt={product.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <ShoppingBag size={40} className="text-amber-300" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-4">
-                    <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full mb-2" style={{ background: 'var(--bg-secondary)', color: 'var(--accent)' }}>
-                      {PRODUCT_TYPE_LABELS[product.type] ?? product.type}
-                    </span>
-                    <h3 className="font-bold text-sm leading-snug mb-1" style={{ color: 'var(--text-primary)' }}>{product.title}</h3>
-                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                      {(product.artists as any)?.artistic_name}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
-              <ShoppingBag size={40} className="mx-auto mb-3 text-amber-300" />
-              <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>Produtos culturais em breve</p>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Os artistas poderão cadastrar suas obras aqui</p>
-            </div>
-          )}
-
-          <div className="text-center mt-8 sm:hidden">
-            <Link to="/produtos" className="btn btn-secondary">
-              Ver todos os produtos
-              <ArrowRight size={16} />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Artistas em Destaque ── */}
-      <section className="py-14 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex items-end justify-between mb-8">
-          <div>
-            <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-              <Star className="inline-block mr-2 text-amber-500 fill-current" size={22} />
-              Agentes Culturais
-            </h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-              Talentos cadastrados no município de Água Boa
+          {/* Título Institucional */}
+          <div className="border-b pb-4" style={{ borderColor: 'var(--border)' }}>
+            <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tight" style={{ color: '#1c3a6e' }}>
+              {heroTitle}
+            </h1>
+            <p className="text-sm sm:text-base font-semibold text-slate-600 dark:text-slate-400 mt-1">
+              {heroSubtitle}
             </p>
+            {heroDescription && (
+              <p className="text-sm mt-2 max-w-2xl" style={{ color: 'var(--text-secondary)' }}>{heroDescription}</p>
+            )}
           </div>
-          <Link
-            to="/artistas"
-            className="hidden sm:flex items-center gap-1 text-sm font-semibold transition-colors"
-            style={{ color: 'var(--accent)' }}
-          >
-            Ver todos
-            <ArrowRight size={16} />
-          </Link>
-        </div>
 
-        {featuredArtists && featuredArtists.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {featuredArtists.map((artist: any) => (
+          {/* ── 4 GRANDES BOTÕES DE AÇÃO (CÁPSULAS AZUIS COM ÍCONE EM CÍRCULO) ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {SMIIC_MODULES.map(({ title, desc, icon: Icon, href }) => (
               <Link
-                key={artist.id}
-                to={`/artistas/${artist.id}`}
-                className="group text-center p-4 rounded-2xl border transition-all hover:shadow-md hover:-translate-y-1"
-                style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+                key={title}
+                to={href}
+                className="group flex items-center gap-4 p-3.5 sm:p-4 rounded-2xl transition-all duration-200 shadow-md hover:shadow-xl hover:-translate-y-0.5"
+                style={{
+                  background: 'linear-gradient(135deg, #1c3a6e 0%, #17325e 100%)',
+                  border: '2px solid #234785',
+                }}
               >
-                <div className="mx-auto w-16 h-16 rounded-full overflow-hidden bg-gradient-to-br from-amber-200 to-orange-300 mb-3 ring-2 ring-offset-2 group-hover:ring-amber-400 transition-all" style={{ '--tw-ring-offset-color': 'var(--bg-card)' } as React.CSSProperties}>
-                  {artist.photo_url ? (
-                    <img src={artist.photo_url} alt={artist.artistic_name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <span className="text-xl font-bold text-white">
-                        {(artist.artistic_name || (artist.profiles as any)?.full_name || '?')[0].toUpperCase()}
-                      </span>
-                    </div>
-                  )}
+                {/* Ícone Redondo Branco com Borda Azul */}
+                <div className="w-14 h-14 rounded-full bg-white flex items-center justify-center flex-shrink-0 shadow-md transition-transform group-hover:scale-105 border-2 border-blue-100">
+                  <Icon className="h-7 w-7 text-blue-900" aria-hidden="true" />
                 </div>
-                <p className="text-xs font-bold leading-tight mb-0.5 truncate" style={{ color: 'var(--text-primary)' }}>
-                  {artist.artistic_name || (artist.profiles as any)?.full_name}
-                </p>
-                <p className="text-xs truncate font-medium" style={{ color: 'var(--text-secondary)' }}>
-                  {artist.category_label || (artist.categories as any)?.name || 'Agente Cultural'}
-                </p>
+
+                {/* Texto do Botão */}
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-lg font-black text-white leading-snug truncate group-hover:text-amber-300 transition-colors">
+                    {title}
+                  </h3>
+                  <p className="text-xs text-blue-100/80 leading-tight truncate mt-0.5">
+                    {desc}
+                  </p>
+                </div>
               </Link>
             ))}
           </div>
-        ) : (
-          <div className="text-center py-12 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
-            <Users size={40} className="mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
-            <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>Nenhum artista verificado ainda</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-              Seja o primeiro a{' '}
-              <Link
-                to={user ? (hasAgent ? '/painel' : '/painel/agentes/cadastrar') : '/cadastro'}
-                className="font-semibold"
-                style={{ color: 'var(--accent)' }}
-              >
-                cadastrar seu perfil
-              </Link>
-            </p>
-          </div>
-        )}
-      </section>
 
-      {/* ── Próximos Eventos ── */}
-      {upcomingEvents && upcomingEvents.length > 0 && (
-        <section className="py-14" style={{ background: 'var(--bg-secondary)' }}>
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="flex items-end justify-between mb-8">
-              <div>
-                <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                  <Calendar className="inline-block mr-2 text-emerald-500" size={22} />
-                  Próximos Eventos
+          {/* ── VITRINE DE AGENTES CULTURAIS (DE CARA LOGO ABAIXO DOS BOTÕES) ── */}
+          <div className="pt-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-6 bg-amber-500 rounded-full inline-block" />
+                <h2 className="text-xl sm:text-2xl font-black" style={{ color: 'var(--text-primary)' }}>
+                  Agentes Culturais em Destaque
                 </h2>
               </div>
-              <Link to="/eventos" className="hidden sm:flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--accent)' }}>
-                Agenda completa <ArrowRight size={16} />
+              <Link
+                to="/agentes"
+                className="text-xs sm:text-sm font-bold inline-flex items-center gap-1 hover:underline"
+                style={{ color: 'var(--accent)' }}
+              >
+                Ver todos os {agentCount ?? ''} agentes <ArrowRight size={14} aria-hidden="true" />
               </Link>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {upcomingEvents.map((event: any) => (
-                <Link
-                  key={event.id}
-                  to="/eventos"
-                  className="group flex gap-4 p-4 rounded-2xl border transition-all hover:shadow-md hover:-translate-y-1"
+
+            {/* Barra de Pesquisa Rápida */}
+            <form onSubmit={handleSearchSubmit} className="flex gap-2 max-w-xl mb-6">
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4 pointer-events-none" aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Buscar agente cultural por nome ou atividade"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Buscar artista por nome ou atividade..."
+                  className="input pl-10 pr-3 py-2.5 w-full text-sm rounded-xl shadow-sm border"
                   style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
-                >
-                  <div className="flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-gradient-to-br from-emerald-100 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 flex items-center justify-center">
-                    {event.cover_url ? (
-                      <img src={event.cover_url} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <Calendar size={22} className="text-emerald-500" />
-                    )}
+                />
+              </div>
+              <button type="submit" className="btn btn-primary px-5 py-2.5 text-sm font-bold shadow-sm rounded-xl flex-shrink-0">
+                Buscar
+              </button>
+            </form>
+
+            {/* Grid de Cards dos Agentes */}
+            {isLoadingAgents ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="card p-3 rounded-2xl animate-pulse">
+                    <div className="aspect-square rounded-xl bg-slate-200 dark:bg-slate-700 mb-2" />
+                    <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-2/3 mb-1" />
+                    <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold leading-tight truncate" style={{ color: 'var(--text-primary)' }}>{event.title}</p>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                      {new Date(event.start_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                      {event.location && ` · ${event.location}`}
-                    </p>
-                    {event.is_free && (
-                      <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full mt-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                        Gratuito
+                ))}
+              </div>
+            ) : isAgentsError ? (
+              <ErrorState error={agentsError} onRetry={() => refetchAgents()} />
+            ) : featuredAgents && featuredAgents.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {featuredAgents.map((agent) => (
+                  <Link
+                    key={agent.id}
+                    to={`/agentes/${agent.id}`}
+                    className="group flex flex-col rounded-2xl overflow-hidden border transition-all duration-200 hover:shadow-lg hover:-translate-y-1"
+                    style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+                  >
+                    {/* Foto */}
+                    <div className="relative aspect-square w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                      {agent.photo_url ? (
+                        <img
+                          src={agent.photo_url}
+                          alt={agent.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center">
+                          <div
+                            className="w-14 h-14 rounded-xl flex items-center justify-center font-black text-2xl text-white shadow"
+                            style={{ background: 'linear-gradient(135deg, #f59e0b, #ea580c)' }}
+                          >
+                            {(agent.name || '?')[0].toUpperCase()}
+                          </div>
+                          <span className="text-[11px] font-semibold mt-1" style={{ color: 'var(--text-muted)' }}>
+                            Sem foto
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Informações */}
+                    <div className="p-3">
+                      <span className="inline-block text-[11px] font-bold text-amber-500 uppercase tracking-wider line-clamp-1">
+                        {agent.typology}
                       </span>
-                    )}
-                  </div>
-                </Link>
-              ))}
+                      <h3 className="font-bold text-sm leading-tight mb-1 group-hover:text-amber-500 transition-colors line-clamp-1" style={{ color: 'var(--text-primary)' }}>
+                        {agent.name}
+                      </h3>
+                      <p className="flex items-center gap-1 text-[11px] font-medium truncate" style={{ color: 'var(--text-secondary)' }}>
+                        <MapPin className="h-3 w-3 text-amber-500 flex-shrink-0" aria-hidden="true" />
+                        <span>{[agent.neighborhood, agent.city].filter(Boolean).join(', ')}</span>
+                      </p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-10 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
+                <Users size={36} aria-hidden="true" className="mx-auto mb-2" style={{ color: 'var(--text-muted)' }} />
+                <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Nenhum agente cultural verificado ainda</p>
+              </div>
+            )}
+
+            <div className="text-center mt-6">
+              <Link
+                to="/agentes"
+                className="btn btn-secondary px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm inline-flex items-center gap-2 hover:scale-105 transition-all"
+              >
+                Ver todos os {agentCount ?? ''} agentes culturais cadastrados
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
             </div>
           </div>
-        </section>
-      )}
 
-      {/* ── CTA Final ── */}
-      <section className="py-16 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="rounded-3xl p-10 text-center" style={{ background: 'linear-gradient(135deg, var(--bg-inst-header), #1e3a6e)' }}>
-          <Mic2 className="mx-auto mb-4 text-amber-400" size={40} />
-          <h2 className="text-3xl font-bold text-white mb-3">
-            Faça parte da cultura de Água Boa
-          </h2>
-          <p className="text-white/70 mb-8 max-w-xl mx-auto">
-            Cadastre seu perfil artístico, divulgue seus produtos culturais, participe de editais e conecte-se com a gestão cultural municipal.
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+        </div>
+
+        {/* ── COLUNA DIREITA: CARD ACESSO AO SISTEMA + INFORMAÇÕES DA PREFEITURA ── */}
+        <div className="lg:col-span-4 space-y-6">
+
+          {/* ── CARD ACESSO AO SISTEMA (EXATAMENTE COMO NO SMIIC CAMPO GRANDE) ── */}
+          <div
+            className="rounded-2xl p-5 shadow-lg border"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+          >
+            {/* Cabeçalho do Card com Ícone de Cadeado/SMIIC */}
+            <div className="flex items-center gap-2 pb-3 mb-4 border-b" style={{ borderColor: 'var(--border)' }}>
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 font-black">
+                <Lock size={18} aria-hidden="true" />
+              </div>
+              <div>
+                <h3 className="font-black text-base text-slate-900 dark:text-white leading-tight">
+                  SMIIC
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                  Acesso ao Sistema
+                </p>
+              </div>
+            </div>
+
             {user ? (
-              hasAgent ? (
-                <Link to="/painel" className="btn btn-primary text-base px-8 py-3">
-                  <User className="h-5 w-5" />
+              /* Usuário já conectado */
+              <div className="space-y-4 text-center py-2">
+                <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center font-black text-xl text-white shadow-md" style={{ background: '#1c3a6e' }}>
+                  {(profile?.full_name || user.email || 'U')[0].toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-slate-900 dark:text-white">
+                    {profile?.full_name || 'Usuário Conectado'}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    {user.email}
+                  </p>
+                </div>
+                <Link
+                  to="/painel"
+                  className="btn btn-primary w-full justify-center py-2.5 text-sm font-bold shadow-sm"
+                >
+                  <LogIn size={16} aria-hidden="true" />
                   Acessar Meu Painel
                 </Link>
-              ) : (
-                <Link to="/painel/agentes/cadastrar" className="btn btn-primary text-base px-8 py-3">
-                  <Mic2 className="h-5 w-5" />
-                  Cadastrar meu Perfil Cultural (SMIIC)
-                </Link>
-              )
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="btn btn-ghost w-full justify-center text-xs text-slate-500 hover:text-red-500"
+                >
+                  <LogOut size={14} aria-hidden="true" />
+                  Sair da Conta
+                </button>
+              </div>
             ) : (
-              <Link to="/cadastro" className="btn btn-primary text-base px-8 py-3">
-                <Mic2 className="h-5 w-5" />
-                Cadastrar meu Perfil
-              </Link>
-            )}
-            <Link to="/artistas" className="inline-flex items-center gap-2 px-8 py-3 rounded-xl border-2 border-white/30 text-white font-semibold hover:border-white/60 hover:bg-white/5 transition-all text-base">
-              <Users className="h-5 w-5" />
-              Explorar Artistas
-            </Link>
-          </div>
-        </div>
-      </section>
+              /* Formulário de Login Direto */
+              <form onSubmit={handleSidebarLogin} className="space-y-3.5">
+                {loginError && (
+                  <div role="alert" className="p-2.5 rounded-lg text-xs bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900">
+                    {loginError}
+                  </div>
+                )}
 
+                <div>
+                  <label htmlFor="home-login-email" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    E-mail
+                  </label>
+                  <input
+                    id="home-login-email"
+                    autoComplete="email"
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="seu@email.com"
+                    required
+                    className="input w-full py-2 px-3 text-sm rounded-lg border"
+                    style={{ background: 'var(--bg-primary)', borderColor: 'var(--border)' }}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="home-login-password" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Senha
+                  </label>
+                  <input
+                    id="home-login-password"
+                    autoComplete="current-password"
+                    type="password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    className="input w-full py-2 px-3 text-sm rounded-lg border"
+                    style={{ background: 'var(--bg-primary)', borderColor: 'var(--border)' }}
+                  />
+                </div>
+
+                {/* Botão ENTRAR em destaque Amarelo/Dourado (como no exemplo do SMIIC) */}
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full py-2.5 rounded-lg font-black text-sm uppercase tracking-wide transition-all duration-200 shadow-md hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
+                  style={{
+                    background: '#f5a623',
+                    color: '#1e293b',
+                  }}
+                >
+                  {isLoggingIn ? 'Entrando...' : 'ENTRAR'}
+                </button>
+
+                {/* Links Esqueci minha senha / Fazer Cadastro */}
+                <div className="pt-2 flex flex-col gap-1.5 text-xs text-center border-t" style={{ borderColor: 'var(--border)' }}>
+                  <Link
+                    to="/recuperar-senha"
+                    className="text-slate-500 hover:text-slate-900 dark:hover:text-white underline"
+                  >
+                    Esqueci minha senha
+                  </Link>
+                  <Link
+                    to="/cadastro"
+                    className="font-bold text-blue-900 dark:text-amber-400 hover:underline"
+                  >
+                    Fazer Cadastro
+                  </Link>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* ── CARD MAPA & CONTATO DA SECRETARIA ── */}
+          <div
+            className="rounded-2xl p-5 shadow border space-y-4"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+          >
+            <div className="flex items-center gap-2 pb-3 border-b" style={{ borderColor: 'var(--border)' }}>
+              <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-900 dark:text-blue-400 font-black">
+                <Map size={18} aria-hidden="true" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                  Município de Água Boa
+                </h4>
+                <p className="text-xs text-slate-500">Mato Grosso · Vale do Araguaia</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl overflow-hidden border aspect-[16/9] relative bg-slate-100 dark:bg-slate-800 flex items-center justify-center" style={{ borderColor: 'var(--border)' }}>
+              <img
+                src="/logo-secretaria.jpg"
+                alt="Prefeitura de Água Boa"
+                loading="lazy"
+                className="w-full h-full object-cover opacity-80"
+              />
+              <div className="absolute inset-0 bg-blue-950/40 flex items-center justify-center">
+                <span className="text-xs font-bold text-white bg-black/50 px-3 py-1.5 rounded-full backdrop-blur-sm">
+                  Água Boa · MT
+                </span>
+              </div>
+            </div>
+
+            <div className="text-xs space-y-1.5 text-slate-600 dark:text-slate-300 font-medium">
+              <p className="font-bold text-slate-900 dark:text-white">
+                Secretaria de Esporte, Cultura, Lazer e Eventos
+              </p>
+              <p className="flex items-center gap-1.5">
+                <Phone size={13} className="text-amber-500" aria-hidden="true" />
+                <span>Atendimento: (66) 3468-6400</span>
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Segunda a Sexta · 07h30 às 17h30
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
     </div>
   )
 }

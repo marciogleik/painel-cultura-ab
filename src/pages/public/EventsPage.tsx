@@ -1,78 +1,202 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Calendar, MapPin, Clock, Ticket } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { Calendar, Search } from 'lucide-react'
-import { useState } from 'react'
+import { sanitizeSearch, safeUrl, formatDateTime, parseDate } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonGrid } from '@/components/ui/Spinner'
+
+type EventType = 'show' | 'peca_teatro' | 'exposicao' | 'festival' | 'oficina' | 'feira' | 'outro'
+
+interface CulturalEvent {
+  id: string
+  title: string
+  type: EventType | null
+  description: string | null
+  location: string | null
+  start_date: string
+  end_date: string | null
+  is_free: boolean
+  price: number | null
+  ticket_link: string | null
+  cover_url: string | null
+}
+
+const TYPE_LABELS: Record<EventType, string> = {
+  show: 'Show',
+  peca_teatro: 'Peça de Teatro',
+  exposicao: 'Exposição',
+  festival: 'Festival',
+  oficina: 'Oficina',
+  feira: 'Feira',
+  outro: 'Evento',
+}
+
+function priceLabel(event: CulturalEvent): string {
+  if (event.is_free || !event.price) return 'Gratuito'
+  return `R$ ${event.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+}
+
+function EventCard({ event, past }: { event: CulturalEvent; past?: boolean }) {
+  const ticket = safeUrl(event.ticket_link)
+  return (
+    <article className={`card group overflow-hidden transition-all hover:-translate-y-1 ${past ? 'opacity-80' : ''}`}>
+      <div className="aspect-video overflow-hidden" style={{ background: 'var(--bg-secondary)' }}>
+        {event.cover_url ? (
+          <img
+            src={event.cover_url}
+            alt={event.title}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <Calendar size={40} style={{ color: 'var(--text-muted)' }} aria-hidden="true" />
+          </div>
+        )}
+      </div>
+      <div className="p-5">
+        <div className="flex flex-wrap gap-2 mb-2">
+          {event.type && <span className="badge badge-blue">{TYPE_LABELS[event.type] ?? event.type}</span>}
+          <span className={`badge ${event.is_free || !event.price ? 'badge-green' : 'badge-amber'}`}>{priceLabel(event)}</span>
+          {past && <span className="badge badge-slate">Realizado</span>}
+        </div>
+        <h3 className="font-bold text-base leading-snug mb-2" style={{ color: 'var(--text-primary)' }}>{event.title}</h3>
+        <ul className="space-y-1 text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+          <li className="flex items-center gap-2">
+            <Clock size={14} className="flex-shrink-0" aria-hidden="true" />
+            <time dateTime={event.start_date}>{formatDateTime(event.start_date)}</time>
+            {event.end_date && (
+              <>
+                <span aria-hidden="true">–</span>
+                <time dateTime={event.end_date}>{formatDateTime(event.end_date)}</time>
+              </>
+            )}
+          </li>
+          {event.location && (
+            <li className="flex items-start gap-2">
+              <MapPin size={14} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+              <span>{event.location}</span>
+            </li>
+          )}
+        </ul>
+        {event.description && (
+          <p className="text-sm line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{event.description}</p>
+        )}
+        {ticket && !past && (
+          <a href={ticket} target="_blank" rel="noopener noreferrer" className="btn btn-secondary text-sm mt-4 w-full justify-center">
+            <Ticket size={14} aria-hidden="true" />
+            Ingressos / mais informações
+          </a>
+        )}
+      </div>
+    </article>
+  )
+}
 
 export function EventsPage() {
   const [search, setSearch] = useState('')
 
-  const { data: items, isLoading } = useQuery({
-    queryKey: ['cultural_events'],
+  const { data: items, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['cultural_events', search],
     queryFn: async () => {
-      const { data } = await supabase
+      let q = supabase
         .from('cultural_events')
-        .select('id, title, type, description, location, start_date, end_date, is_free, cover_url')
+        .select('id, title, type, description, location, start_date, end_date, is_free, price, ticket_link, cover_url')
         .eq('is_active', true)
-        .order('created_at', { ascending: false })
-      return data ?? []
+        .order('start_date', { ascending: true })
+      const term = sanitizeSearch(search)
+      if (term) q = q.ilike('title', `%${term}%`)
+      const { data, error } = await q
+      if (error) throw error
+      return (data ?? []) as CulturalEvent[]
     },
+    placeholderData: (prev) => prev,
   })
 
-  const filtered = items?.filter((item: any) =>
-    item.title?.toLowerCase().includes(search.toLowerCase())
-  )
+  const { upcoming, past } = useMemo(() => {
+    const now = Date.now()
+    const upcoming: CulturalEvent[] = []
+    const past: CulturalEvent[] = []
+    for (const ev of items ?? []) {
+      const end = parseDate(ev.end_date ?? ev.start_date)
+      if (end && end.getTime() < now) past.push(ev)
+      else upcoming.push(ev)
+    }
+    // Já realizados: os mais recentes primeiro
+    past.reverse()
+    return { upcoming, past }
+  }, [items])
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      <div style={{ background: 'var(--bg-inst-header)', borderBottom: '3px solid var(--accent)' }}>
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
-          <div className="flex items-center gap-3 mb-2">
-            <Calendar size={32} style={{ color: 'var(--accent)' }} />
-            <h1 className="text-3xl font-bold" style={{ color: 'var(--text-inst-title)' }}>Eventos Culturais</h1>
-          </div>
-          <p style={{ color: 'var(--text-inst-subtitle)' }}>Shows, peças, festivais e exposições em Água Boa</p>
-        </div>
-      </div>
+      <PageHeader
+        variant="public"
+        icon={Calendar}
+        eyebrow="Agenda cultural"
+        title="Eventos Culturais"
+        description="Shows, peças, festivais e exposições em Água Boa"
+      />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
-        <div className="relative mb-8 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-muted)' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="input pl-10 w-full" />
-        </div>
+        <SearchInput
+          className="mb-8 max-w-md"
+          value={search}
+          onChange={setSearch}
+          label="Buscar evento"
+          placeholder="Buscar por título..."
+        />
 
         {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="rounded-2xl border animate-pulse" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)', height: 240 }} />
-            ))}
-          </div>
-        ) : filtered && filtered.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filtered.map((item: any) => (
-              <div key={item.id} className="group rounded-2xl overflow-hidden border transition-all hover:shadow-lg hover:-translate-y-1" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                <div className="aspect-video overflow-hidden" style={{ background: 'var(--bg-secondary)' }}>
-                  {item.cover_url ?? item.photo_url ? (
-                    <img src={item.cover_url ?? item.photo_url} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Calendar size={40} style={{ color: 'var(--text-muted)' }} />
-                    </div>
-                  )}
-                </div>
-                <div className="p-5">
-                  <h3 className="font-bold text-base leading-snug mb-1" style={{ color: 'var(--text-primary)' }}>{item.title}</h3>
-                  {item.location && <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>{item.location}</p>}
-                  {item.description && <p className="text-sm line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{item.description}</p>}
-                </div>
-              </div>
-            ))}
-          </div>
+          <SkeletonGrid items={6} />
+        ) : isError ? (
+          <ErrorState error={error} onRetry={() => refetch()} />
+        ) : (items?.length ?? 0) === 0 ? (
+          search ? (
+            <EmptyState
+              icon={Calendar}
+              title="Nenhum evento encontrado"
+              description={`Não encontramos resultados para "${search}".`}
+              action={<button type="button" className="btn btn-secondary" onClick={() => setSearch('')}>Limpar busca</button>}
+            />
+          ) : (
+            <EmptyState
+              icon={Calendar}
+              title="Nenhum evento cadastrado ainda"
+              description="Em breve a agenda cultural do município estará aqui."
+            />
+          )
         ) : (
-          <div className="text-center py-20">
-            <Calendar size={48} className="mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
-            <p className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Nenhum item cadastrado ainda</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Em breve novidades aqui</p>
-          </div>
+          <>
+            <section aria-labelledby="proximos-eventos">
+              <h2 id="proximos-eventos" className="text-xl font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
+                Próximos eventos
+              </h2>
+              {upcoming.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {upcoming.map((ev) => <EventCard key={ev.id} event={ev} />)}
+                </div>
+              ) : (
+                <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
+                  Nenhum evento programado no momento.
+                </p>
+              )}
+            </section>
+
+            {past.length > 0 && (
+              <section aria-labelledby="eventos-realizados" className="mt-12">
+                <h2 id="eventos-realizados" className="text-xl font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
+                  Já realizados
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {past.map((ev) => <EventCard key={ev.id} event={ev} past />)}
+                </div>
+              </section>
+            )}
+          </>
         )}
       </div>
     </div>

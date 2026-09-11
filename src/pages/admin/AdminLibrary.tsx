@@ -1,153 +1,173 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-import { BookOpen, Plus, Pencil, Trash2, X, Save } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { BookOpen, Plus } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { useCrud } from '@/hooks/useCrud'
+import { Modal } from '@/components/ui/Modal'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
+import { SkeletonList } from '@/components/ui/Spinner'
+import { AdminTable, BoolBadge, RowActions, type AdminColumn } from '@/components/admin/AdminTable'
+import { Field, CheckboxField, FormFooter } from '@/components/admin/Field'
+import { asNumberOrNull } from '@/components/admin/formRules'
+import { SiteContentForm } from '@/components/admin/SiteContentForm'
+import { ImageUploader } from '@/components/ImageUploader'
+
+interface LibraryBook {
+  id: string
+  title: string
+  author: string | null
+  genre: string | null
+  year: number | null
+  isbn: string | null
+  description: string | null
+  cover_url: string | null
+  is_available: boolean
+  created_at: string
+}
+
+interface BookForm {
+  title: string
+  author: string
+  genre: string
+  year: number | null
+  isbn: string
+  description: string
+  cover_url: string
+  is_available: boolean
+}
+
+const DEFAULTS: BookForm = { title: '', author: '', genre: '', year: null, isbn: '', description: '', cover_url: '', is_available: true }
+
+function toForm(b: LibraryBook): BookForm {
+  return {
+    title: b.title ?? '',
+    author: b.author ?? '',
+    genre: b.genre ?? '',
+    year: b.year,
+    isbn: b.isbn ?? '',
+    description: b.description ?? '',
+    cover_url: b.cover_url ?? '',
+    is_available: b.is_available ?? true,
+  }
+}
 
 export function AdminLibrary() {
-  const qc = useQueryClient()
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const { register, handleSubmit, reset } = useForm()
-  const { register: regContent, handleSubmit: handleContent } = useForm()
+  const { isAdmin } = useAuth()
+  const confirm = useConfirm()
+  const formId = useId()
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<LibraryBook | null>(null)
 
-  const { data: books } = useQuery({
+  const crud = useCrud<LibraryBook>({
+    table: 'library_books',
     queryKey: ['admin-library-books'],
-    queryFn: async () => {
-      const { data } = await supabase.from('library_books').select('*').order('title')
-      return data ?? []
-    },
+    orderBy: ['title', true],
+    invalidate: [['library-books']],
   })
 
-  const { data: content } = useQuery({
-    queryKey: ['library-content-admin'],
-    queryFn: async () => {
-      const { data } = await supabase.from('site_content').select('*').like('key', 'library.%')
-      return data ?? []
-    },
-  })
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<BookForm>({ defaultValues: DEFAULTS })
+  const coverUrl = watch('cover_url')
 
-  const contentMutation = useMutation({
-    mutationFn: async (data: any) => {
-      for (const [key, value] of Object.entries(data)) {
-        await supabase.from('site_content').upsert({ key, value: value as string, label: key, type: 'text', section: 'biblioteca' }, { onConflict: 'key' })
-      }
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['library-content-admin'] }),
-  })
+  function openNew() { setEditing(null); reset(DEFAULTS); setOpen(true) }
+  function openEdit(item: LibraryBook) { setEditing(item); reset(toForm(item)); setOpen(true) }
+  function close() { setOpen(false) }
 
-  const bookMutation = useMutation({
-    mutationFn: async (data: any) => {
-      if (editing) {
-        await supabase.from('library_books').update(data).eq('id', editing.id)
-      } else {
-        await supabase.from('library_books').insert(data)
-      }
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-library-books'] }); setModalOpen(false); setEditing(null); reset() },
-  })
+  function onSubmit(values: BookForm) {
+    crud.save.mutate({ id: editing?.id, ...values }, { onSuccess: close })
+  }
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => supabase.from('library_books').delete().eq('id', id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-library-books'] }),
-  })
+  async function onDelete(item: LibraryBook) {
+    const ok = await confirm({ title: `Excluir "${item.title}"?`, message: 'O livro será removido do acervo exibido no site.', danger: true, confirmLabel: 'Excluir' })
+    if (ok) crud.remove.mutate(item.id)
+  }
+
+  const columns: AdminColumn<LibraryBook>[] = [
+    {
+      key: 'title', header: 'Título',
+      render: (b) => (
+        <div className="flex items-center gap-3">
+          {b.cover_url ? (
+            <img src={b.cover_url} alt="" className="w-8 h-11 rounded object-cover flex-shrink-0" style={{ background: 'var(--bg-secondary)' }} />
+          ) : (
+            <div className="w-8 h-11 rounded flex items-center justify-center flex-shrink-0" style={{ background: 'var(--bg-secondary)' }} aria-hidden="true"><BookOpen size={14} style={{ color: 'var(--text-muted)' }} /></div>
+          )}
+          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{b.title}</span>
+        </div>
+      ),
+    },
+    { key: 'author', header: 'Autor(a)', render: (b) => b.author ?? '—' },
+    { key: 'genre', header: 'Gênero', render: (b) => b.genre ?? '—' },
+    { key: 'year', header: 'Ano', render: (b) => b.year ?? '—' },
+    { key: 'available', header: 'Disponível', render: (b) => <BoolBadge value={b.is_available} /> },
+    { key: 'actions', header: <span className="sr-only">Ações</span>, align: 'right', render: (b) => <RowActions canWrite={isAdmin} onEdit={() => openEdit(b)} onDelete={() => onDelete(b)} /> },
+  ]
 
   return (
     <div className="animate-fade-in space-y-8">
-      <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Biblioteca Pública</h1>
+      <PageHeader icon={BookOpen} title="Biblioteca Pública" description="Informações da biblioteca exibidas no site e o acervo de livros." />
 
-      {/* Informações editáveis */}
-      <div className="rounded-2xl border p-6" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-        <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--text-primary)' }}>Informações da Biblioteca</h2>
-        <form onSubmit={handleContent(data => contentMutation.mutate(data))} className="space-y-4">
-          {content?.map((c: any) => (
-            <div key={c.key}>
-              <label className="label">{c.label}</label>
-              <input
-                defaultValue={c.value ?? ''}
-                {...regContent(c.key)}
-                className="input w-full"
-              />
-            </div>
-          ))}
-          <button type="submit" disabled={contentMutation.isPending} className="btn btn-primary">
-            <Save size={16} /> {contentMutation.isPending ? 'Salvando...' : 'Salvar informações'}
-          </button>
-        </form>
-      </div>
+      <section aria-labelledby="library-info-title">
+        <h2 id="library-info-title" className="text-lg font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Informações da biblioteca</h2>
+        <SiteContentForm keyPrefix="library." canWrite={isAdmin} submitLabel="Salvar informações" />
+      </section>
 
-      {/* Acervo */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Acervo de Livros</h2>
-          <button onClick={() => { setEditing(null); reset({}); setModalOpen(true) }} className="btn btn-primary">
-            <Plus size={16} /> Adicionar Livro
-          </button>
+      <section aria-labelledby="library-books-title">
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <h2 id="library-books-title" className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Acervo de livros</h2>
+          {isAdmin && <button type="button" onClick={openNew} className="btn btn-primary"><Plus size={16} /> Adicionar livro</button>}
         </div>
 
-        {books && books.length > 0 ? (
-          <div className="rounded-2xl border overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-            <table className="w-full">
-              <thead style={{ background: 'var(--bg-secondary)' }}>
-                <tr>
-                  <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Título</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Autor</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Disponível</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
-                {books.map((book: any) => (
-                  <tr key={book.id} style={{ background: 'var(--bg-card)' }}>
-                    <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{book.title}</td>
-                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{book.author ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${book.is_available ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                        {book.is_available ? 'Sim' : 'Não'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-2">
-                        <button onClick={() => { setEditing(book); reset(book); setModalOpen(true) }} className="p-1.5 rounded text-amber-600 hover:bg-amber-50"><Pencil size={14} /></button>
-                        <button onClick={() => { if (confirm('Excluir?')) deleteMutation.mutate(book.id) }} className="p-1.5 rounded text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {crud.isLoading ? (
+          <SkeletonList rows={5} />
+        ) : crud.error ? (
+          <ErrorState error={crud.error} onRetry={() => crud.refetch()} />
+        ) : crud.items.length === 0 ? (
+          <EmptyState icon={BookOpen} title="Nenhum livro cadastrado" description="Adicione livros para exibir o acervo no site." action={isAdmin && <button type="button" onClick={openNew} className="btn btn-primary"><Plus size={16} /> Adicionar livro</button>} />
         ) : (
-          <div className="text-center py-12 rounded-2xl border border-dashed" style={{ borderColor: 'var(--border)' }}>
-            <BookOpen size={40} className="mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
-            <p style={{ color: 'var(--text-primary)' }}>Nenhum livro cadastrado</p>
-          </div>
+          <AdminTable columns={columns} rows={crud.items} caption="Acervo de livros da biblioteca" />
         )}
-      </div>
+      </section>
 
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{editing ? 'Editar Livro' : 'Novo Livro'}</h2>
-              <button onClick={() => setModalOpen(false)} className="p-2 rounded-lg" style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
+      <Modal
+        open={open}
+        onClose={close}
+        title={editing ? 'Editar livro' : 'Novo livro'}
+        locked={crud.save.isPending}
+        footer={<FormFooter formId={formId} onCancel={close} loading={crud.save.isPending} canWrite={isAdmin} />}
+      >
+        <form id={formId} onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          <fieldset disabled={!isAdmin} className="space-y-4 min-w-0">
+            <Field label="Título" required error={errors.title?.message}>
+              {(p) => <input {...p} {...register('title', { required: 'Informe o título do livro.' })} className="input w-full" />}
+            </Field>
+            <Field label="Autor(a)">
+              {(p) => <input {...p} {...register('author')} className="input w-full" />}
+            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Gênero">
+                {(p) => <input {...p} {...register('genre')} className="input w-full" />}
+              </Field>
+              <Field label="Ano" error={errors.year?.message}>
+                {(p) => <input {...p} {...register('year', { ...asNumberOrNull, min: { value: 0, message: 'Ano inválido.' }, max: { value: 2100, message: 'Ano inválido.' } })} type="number" className="input w-full" />}
+              </Field>
+              <Field label="ISBN">
+                {(p) => <input {...p} {...register('isbn')} className="input w-full" />}
+              </Field>
             </div>
-            <form onSubmit={handleSubmit(data => bookMutation.mutate(data))} className="space-y-4">
-              <div><label className="label">Título *</label><input {...register('title', { required: true })} className="input w-full" /></div>
-              <div><label className="label">Autor</label><input {...register('author')} className="input w-full" /></div>
-              <div><label className="label">Gênero</label><input {...register('genre')} className="input w-full" /></div>
-              <div><label className="label">Ano</label><input {...register('year', { valueAsNumber: true })} type="number" className="input w-full" /></div>
-              <div><label className="label">ISBN</label><input {...register('isbn')} className="input w-full" /></div>
-              <div><label className="label">Descrição</label><textarea {...register('description')} className="input w-full" rows={2} /></div>
-              <div className="flex items-center gap-2"><input {...register('is_available')} type="checkbox" id="avail" defaultChecked /><label htmlFor="avail" style={{ color: 'var(--text-primary)' }}>Disponível</label></div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setModalOpen(false)} className="btn btn-secondary flex-1">Cancelar</button>
-                <button type="submit" disabled={bookMutation.isPending} className="btn btn-primary flex-1">{bookMutation.isPending ? 'Salvando...' : 'Salvar'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <Field label="Descrição">
+              {(p) => <textarea {...p} {...register('description')} className="input w-full" rows={2} />}
+            </Field>
+            <div>
+              <p className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Capa</p>
+              <input type="hidden" {...register('cover_url')} />
+              <ImageUploader label="Capa do livro" currentUrl={coverUrl || null} folder="library" maxMb={5} onUpload={(url) => setValue('cover_url', url, { shouldDirty: true })} />
+            </div>
+            <CheckboxField label="Disponível para empréstimo" {...register('is_available')} />
+          </fieldset>
+        </form>
+      </Modal>
     </div>
   )
 }

@@ -1,40 +1,45 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import type { UserRole } from '@/types'
+import { FullPageSpinner } from '@/components/ui/Spinner'
 
 interface ProtectedRouteProps {
-  children?: React.ReactNode
   allowedRoles?: UserRole[]
   redirectTo?: string
 }
 
-export function ProtectedRoute({
-  children,
-  allowedRoles,
-  redirectTo = '/login',
-}: ProtectedRouteProps) {
-  const { user, profile, isLoading } = useAuth()
+export function ProtectedRoute({ allowedRoles, redirectTo = '/login' }: ProtectedRouteProps) {
+  const { user, profile, role, isLoading, profileError, signOut } = useAuth()
   const location = useLocation()
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-amber-500 border-t-transparent" />
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Carregando...</p>
-        </div>
-      </div>
-    )
-  }
+  if (isLoading) return <FullPageSpinner label="Carregando sua conta..." />
 
   if (!user) {
     return <Navigate to={redirectTo} state={{ from: location }} replace />
   }
 
-  if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
+  // Sessão válida, mas sem perfil utilizável: não deixa passar para nenhuma área restrita.
+  if (!profile || !role || profileError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6" style={{ background: 'var(--bg-primary)' }}>
+        <div className="card max-w-md w-full p-8 text-center">
+          <h1 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+            Não foi possível acessar sua conta
+          </h1>
+          <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
+            {profileError ?? 'Seu perfil ainda não foi criado. Tente entrar novamente em alguns instantes.'}
+          </p>
+          <button type="button" className="btn btn-secondary" onClick={() => signOut()}>
+            Sair
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (allowedRoles && !allowedRoles.includes(role)) {
     return <Navigate to="/acesso-negado" replace />
   }
 
-  // Support both children and Outlet patterns
-  return children ? <>{children}</> : <Outlet />
+  return <Outlet />
 }

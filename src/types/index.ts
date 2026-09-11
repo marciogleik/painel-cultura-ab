@@ -191,7 +191,9 @@ export interface Edital {
 export interface Inscription {
   id: string
   edital_id: string
-  artist_id: string
+  agent_id: string | null
+  /** @deprecated fluxo legado (tabela artists) */
+  artist_id: string | null
   status: InscriptionStatus
   notes: string | null
   reviewer_notes: string | null
@@ -202,6 +204,8 @@ export interface Inscription {
   updated_at: string
   // Joined
   editais?: Edital
+  cultural_agents?: Pick<CulturalAgent, 'id' | 'display_name' | 'photo_url' | 'person_type'> | null
+  /** @deprecated fluxo legado */
   artists?: Artist
 }
 
@@ -276,13 +280,78 @@ export interface CulturalAgent {
   terms_accepted: boolean
   terms_accepted_at: string | null
   terms_version: string | null
-  // Currículo
-  curriculum_url?: string | null
-  show_curriculum?: boolean
+  // Currículo — caminho no bucket privado agent-files (ou URL legada)
+  curriculum_url: string | null
+  show_curriculum: boolean
   // Visibilidade
+  is_public: boolean
+  // Quem criou (owner inicial)
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type AgentInviteStatus = 'pending' | 'requested' | 'accepted' | 'rejected'
+
+/**
+ * Linha da view public_cultural_agents: o que qualquer visitante pode ver.
+ * Nunca contém CPF, CNPJ, nascimento, gênero ou raça.
+ */
+export interface PublicCulturalAgent {
+  id: string
+  person_type: AgentPersonType
+  collective_type: AgentCollectiveType
+  display_name: string | null
+  biography: string | null
+  photo_url: string | null
+  show_contact: boolean
+  phone: string | null
+  show_curriculum: boolean
+  curriculum_url: string | null
+  city: string | null
+  state: string | null
+  neighborhood: string | null
+  show_address: boolean
+  show_social: boolean
+  registration_status: AgentRegistrationStatus
   is_public: boolean
   created_at: string
   updated_at: string
+  // Joined (embutidos pelo PostgREST)
+  typologies?: AgentTypology[]
+  areas?: AgentArea[]
+  social_links?: AgentSocialLink[]
+}
+
+export interface AgentNotification {
+  id: string
+  recipient_id: string
+  type: 'membership_invite' | 'membership_accepted' | 'membership_rejected' | 'membership_request' | 'status_change' | 'general'
+  title: string
+  body: string | null
+  is_read: boolean
+  meta: { agent_id?: string; membership_id?: string; user_id?: string; role?: string; artist_role?: string } | null
+  created_at: string
+}
+
+export interface CulturalProduct {
+  id: string
+  agent_id: string | null
+  artist_id: string | null
+  title: string
+  type: 'peca_teatro' | 'show' | 'album' | 'livro' | 'exposicao' | 'filme' | 'danca' | 'artesanato' | 'grafite' | 'outro'
+  cover_url: string | null
+  description: string | null
+  technical_sheet: Record<string, unknown>
+  whatsapp: string | null
+  external_link: string | null
+  is_active: boolean
+  is_featured: boolean
+  views: number
+  created_at: string
+  updated_at: string
+  // Joined
+  cultural_agents?: Pick<CulturalAgent, 'id' | 'display_name' | 'photo_url'> | null
 }
 
 export interface AgentMembership {
@@ -290,8 +359,13 @@ export interface AgentMembership {
   user_id: string
   agent_id: string
   role: AgentMembershipRole
+  artist_role?: string | null
+  message?: string | null
   is_primary: boolean
+  invite_status: AgentInviteStatus
   created_at: string
+  // Joined
+  profiles?: Pick<Profile, 'full_name' | 'avatar_url' | 'phone'> | null
 }
 
 export interface AgentAddress {
@@ -378,12 +452,15 @@ export interface AgentRelationship {
 /** Tipo completo do agente com todos os relacionamentos (para queries admin/perfil próprio) */
 export interface CulturalAgentWithRelations extends CulturalAgent {
   memberships?: AgentMembership[]
-  address?: AgentAddress
+  address?: AgentAddress | null
   typologies?: AgentTypology[]
   areas?: AgentArea[]
   social_links?: AgentSocialLink[]
-  privacy?: AgentPrivacy
+  privacy?: AgentPrivacy | null
   relationships?: AgentRelationship[]
+  /** Papel do usuário logado neste agente (quando vindo de getMyAgents) */
+  membership_role?: AgentMembershipRole
+  is_primary?: boolean
 }
 
 /** Percentual de completude calculado em runtime — nunca persistido */

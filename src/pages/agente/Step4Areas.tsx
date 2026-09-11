@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { Check } from 'lucide-react'
+import { LoadingButton } from '@/components/ui/ConfirmDialog'
+import { ErrorState } from '@/components/ui/EmptyState'
 import type { Category } from '@/types'
 import type { WizardStep4 } from './useAgentWizard'
 
@@ -9,10 +11,11 @@ interface Step4Props {
   onChange: (values: Partial<WizardStep4>) => void
   onNext: () => void
   onBack: () => void
+  isSaving: boolean
 }
 
-export function Step4Areas({ data, onChange, onNext, onBack }: Step4Props) {
-  const { data: categories, isLoading } = useQuery({
+export function Step4Areas({ data, onChange, onNext, onBack, isSaving }: Step4Props) {
+  const { data: categories, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['categories-active'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -47,16 +50,20 @@ export function Step4Areas({ data, onChange, onNext, onBack }: Step4Props) {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6" aria-busy="true">
           {[...Array(9)].map((_, i) => <div key={i} className="skeleton h-16 rounded-xl" />)}
         </div>
+      ) : isError ? (
+        <ErrorState error={error} onRetry={() => refetch()} className="mb-6" />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6" role="group" aria-label="Áreas de atuação">
           {categories?.map((cat) => {
             const isSelected = selectedIds.has(cat.id)
             return (
               <button
                 key={cat.id}
+                type="button"
+                aria-pressed={isSelected}
                 onClick={() => toggle(cat.id)}
                 className="card p-3 text-left transition-all duration-200 relative"
                 style={{
@@ -64,7 +71,7 @@ export function Step4Areas({ data, onChange, onNext, onBack }: Step4Props) {
                   background: isSelected ? 'rgba(245,158,11,0.06)' : undefined,
                 }}
               >
-                {cat.icon && <span className="text-2xl mb-1 block">{cat.icon}</span>}
+                {cat.icon && <span className="text-2xl mb-1 block" aria-hidden="true">{cat.icon}</span>}
                 <span
                   className="text-xs font-medium block"
                   style={{ color: isSelected ? 'var(--accent)' : 'var(--text-secondary)' }}
@@ -73,6 +80,7 @@ export function Step4Areas({ data, onChange, onNext, onBack }: Step4Props) {
                 </span>
                 {isSelected && (
                   <div
+                    aria-hidden="true"
                     className="absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center"
                     style={{ background: 'var(--accent)' }}
                   >
@@ -86,16 +94,16 @@ export function Step4Areas({ data, onChange, onNext, onBack }: Step4Props) {
       )}
 
       {selectedIds.size > 0 && (
-        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }} aria-live="polite">
           {selectedIds.size} {selectedIds.size === 1 ? 'área selecionada' : 'áreas selecionadas'}
         </p>
       )}
 
       <div className="flex gap-3">
-        <button onClick={onBack} className="btn btn-secondary flex-1">Voltar</button>
-        <button onClick={onNext} className="btn btn-primary flex-2">
+        <button type="button" onClick={onBack} disabled={isSaving} className="btn btn-secondary flex-1">Voltar</button>
+        <LoadingButton type="button" onClick={onNext} loading={isSaving} className="btn btn-primary flex-2">
           {selectedIds.size === 0 ? 'Pular por enquanto' : 'Continuar'}
-        </button>
+        </LoadingButton>
       </div>
     </div>
   )
