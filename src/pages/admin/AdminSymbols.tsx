@@ -92,7 +92,7 @@ export function AdminSymbols() {
   function onSubmit(values: SymbolForm) {
     // O conteúdo é renderizado como HTML no site: sanitiza antes de gravar.
     const content_html = values.content_html.trim()
-      ? DOMPurify.sanitize(values.content_html, { USE_PROFILES: { html: true } })
+      ? DOMPurify.sanitize(values.content_html, { USE_PROFILES: { html: true }, ADD_TAGS: ['iframe'], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] })
       : ''
     crud.save.mutate({ id: editing?.id, ...values, content_html, sort_order: values.sort_order ?? 0 }, { onSuccess: close })
   }

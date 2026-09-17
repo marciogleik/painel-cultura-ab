@@ -419,6 +419,7 @@ CREATE POLICY "memberships_select" ON public.agent_memberships FOR SELECT
     user_id = (select auth.uid())
     OR public.is_agent_member(agent_id, 'admin')
     OR public.is_servidor_or_above()
+    OR invite_status = 'accepted'
   );
 
 DROP POLICY IF EXISTS "memberships_update" ON public.agent_memberships;
@@ -433,6 +434,9 @@ CREATE POLICY "memberships_delete" ON public.agent_memberships FOR DELETE
     OR public.is_agent_member(agent_id, 'owner')
     OR public.is_admin()
   );
+
+DROP FUNCTION IF EXISTS public.invite_agent_member(uuid, text);
+DROP FUNCTION IF EXISTS public.invite_agent_member(uuid, text, text);
 
 CREATE OR REPLACE FUNCTION public.invite_agent_member(
   p_agent_id uuid,

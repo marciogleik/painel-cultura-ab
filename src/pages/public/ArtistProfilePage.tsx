@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -58,6 +58,10 @@ export function ArtistProfilePage() {
   
   const [ratingHover, setRatingHover] = useState(0)
   const [isRating, setIsRating] = useState(false)
+
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [id])
 
   const [requestModalOpen, setRequestModalOpen] = useState(false)
   const [requestedRole, setRequestedRole] = useState('')

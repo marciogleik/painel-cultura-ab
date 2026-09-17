@@ -418,7 +418,7 @@ export function HomePage() {
                 {/* Links Esqueci minha senha / Fazer Cadastro */}
                 <div className="pt-2 flex flex-col gap-1.5 text-xs text-center border-t" style={{ borderColor: 'var(--border)' }}>
                   <Link
-                    to="/recuperar-senha"
+                    to="/esqueci-senha"
                     className="text-slate-500 hover:text-slate-900 dark:hover:text-white underline"
                   >
                     Esqueci minha senha

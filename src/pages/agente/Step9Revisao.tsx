@@ -72,10 +72,18 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
   })
   const flat = useMemo(() => flattenTypologyTree(tree), [tree])
 
-  const canSubmit = agentStatus === null || SUBMITTABLE_STATUSES.includes(agentStatus)
+  const hasMissing = 
+    !data.step2.display_name || 
+    !(data.step7.photo_url || data.step7.photoFile) ||
+    data.step3.typology_ids.length === 0 ||
+    !(data.step5.city && data.step5.state) ||
+    data.step2.biography.length < 50
+
+  const canSubmit = (agentStatus === null || SUBMITTABLE_STATUSES.includes(agentStatus)) && !hasMissing
   const isApproved = agentStatus === 'aprovado'
 
   const handleSubmit = async () => {
+    if (hasMissing) return
     const ok = await onSubmit()
     if (ok) setSubmitted(true)
   }
@@ -279,11 +287,18 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
 
       <div className="flex gap-3">
         <button type="button" onClick={onBack} disabled={isSaving} className="btn btn-secondary flex-1">Voltar</button>
-        {canSubmit ? (
-          <LoadingButton type="button" onClick={handleSubmit} loading={isSaving} className="btn btn-primary flex-2">
-            <Send size={16} aria-hidden="true" />
-            {isSaving ? 'Enviando…' : agentStatus === 'rejeitado' ? 'Reenviar cadastro' : 'Enviar cadastro'}
-          </LoadingButton>
+        {agentStatus === null || SUBMITTABLE_STATUSES.includes(agentStatus) ? (
+          <div className="flex-2 flex flex-col items-center">
+            <LoadingButton type="button" onClick={handleSubmit} disabled={hasMissing} loading={isSaving} className="btn btn-primary w-full">
+              <Send size={16} aria-hidden="true" />
+              {isSaving ? 'Enviando…' : agentStatus === 'rejeitado' ? 'Reenviar cadastro' : 'Enviar cadastro'}
+            </LoadingButton>
+            {hasMissing && (
+              <span className="text-xs text-red-500 mt-1 block text-center">
+                Preencha todos os campos obrigatórios nas etapas anteriores para enviar.
+              </span>
+            )}
+          </div>
         ) : (
           <button
             type="button"

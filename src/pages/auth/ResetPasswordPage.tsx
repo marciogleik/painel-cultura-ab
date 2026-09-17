@@ -23,7 +23,7 @@ type FormData = z.infer<typeof schema>
  * temporária (evento PASSWORD_RECOVERY); aqui o usuário define a nova senha.
  */
 export function ResetPasswordPage() {
-  const { user, isLoading, updatePassword } = useAuth()
+  const { user, isLoading, updatePassword, isPasswordRecovery } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
   const [show, setShow] = useState(false)
@@ -54,10 +54,10 @@ export function ResetPasswordPage() {
 
         {isLoading ? (
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Validando o link...</p>
-        ) : !user ? (
+        ) : (!user || !isPasswordRecovery) ? (
           <div className="space-y-4">
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Este link de recuperação expirou ou já foi usado. Peça um novo para receber outro e-mail.
+              Este link de recuperação expirou ou você não está no fluxo de recuperação de senha. Peça um novo para receber outro e-mail.
             </p>
             <Link to="/esqueci-senha" className="btn btn-primary w-full justify-center">Pedir novo link</Link>
           </div>

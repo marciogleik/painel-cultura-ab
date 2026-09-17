@@ -108,7 +108,7 @@ const INITIAL_DATA: WizardData = {
     cnpj: '',
   },
   step3: { typology_ids: [], draftTip1: '', draftTip2: '', draftTip3: '' },
-  step5: { city: 'Água Boa', state: 'MT' },
+  step5: { city: '', state: '' },
   step6: { links: [] },
   step7: { photo_url: null, photoFile: null, saved_photo_url: null },
   step8: {

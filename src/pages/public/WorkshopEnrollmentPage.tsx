@@ -80,7 +80,7 @@ export function WorkshopEnrollmentPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('cultural_workshops')
-        .select('id, title, instructor, schedule, location, category')
+        .select('id, title, instructor, schedule, location, category, vacancies')
         .eq('is_active', true)
         .order('title')
       if (error) throw error
@@ -118,6 +118,22 @@ export function WorkshopEnrollmentPage() {
 
   const mutation = useMutation({
     mutationFn: async (data: EnrollmentFormData) => {
+      // A7: Check if workshop has vacancies
+      if (data.workshop_id) {
+        const ws = workshops?.find((w) => w.id === data.workshop_id)
+        if (ws && typeof ws.vacancies === 'number' && ws.vacancies <= 0) {
+          throw new Error('Esta oficina não possui vagas disponíveis no momento.')
+        }
+      }
+
+      // B10: Validate CPF loosely and Phone loosely
+      if (data.cpf && !/^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/.test(data.cpf)) {
+        throw new Error('CPF com formato inválido')
+      }
+      if (!/^\(?\d{2}\)?\s?\d{4,5}-?\d{4}$/.test(data.phone)) {
+        throw new Error('Telefone com formato inválido')
+      }
+      
       const payload = {
         ...data,
         age: data.age ? parseInt(data.age, 10) : null,
@@ -515,17 +531,12 @@ export function WorkshopEnrollmentPage() {
             <button
               type="submit"
               disabled={mutation.isPending}
-              className="btn btn-primary flex-1 text-base py-3"
+              className="btn btn-primary gap-2"
             >
               {mutation.isPending ? (
-                <span className="flex items-center gap-2 justify-center">
-                  <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  Enviando...
-                </span>
+                <>Enviando... <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /></>
               ) : (
-                <span className="flex items-center gap-2 justify-center">
-                  <ChevronRight size={18} /> Enviar Ficha de Matrícula
-                </span>
+                <>Enviar Ficha de Matrícula <ChevronRight size={18} /></>
               )}
             </button>
           </div>
