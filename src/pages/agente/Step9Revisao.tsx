@@ -90,14 +90,10 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
           <CheckCircle size={40} style={{ color: 'var(--success)' }} aria-hidden="true" />
         </div>
         <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-          Cadastro enviado para homologação
+          Cadastro concluído com sucesso
         </h2>
-        <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
-          {AGENT_STATUS.enviado.description}
-        </p>
-        <p className="text-sm mb-8" style={{ color: 'var(--text-muted)' }}>
-          Você será avisado quando o cadastro for analisado. Enquanto isso, o perfil fica visível apenas para você.
-          Se precisar corrigir algo, use “Retirar envio” na página do agente.
+        <p className="text-sm mb-8" style={{ color: 'var(--text-secondary)' }}>
+          Seu agente cultural foi publicado e já está disponível na plataforma.
         </p>
         <div className="flex gap-3 justify-center flex-wrap">
           <button type="button" onClick={() => navigate('/painel')} className="btn btn-secondary">
@@ -111,7 +107,7 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
     )
   }
 
-  const { step1, step2, step3, step4, step5, step6, step7, step8 } = data
+  const { step1, step2, step3, step5, step6, step7, step8 } = data
   const isPJ = step1.person_type === 'juridica'
   const status = agentStatus ? AGENT_STATUS[agentStatus] : null
 
@@ -179,7 +175,7 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
             {isPJ ? 'Pessoa Jurídica' : 'Pessoa Física'} · {step1.collective_type === 'individual' ? 'Individual' : 'Coletivo / Grupo'}
           </p>
         </div>
-        <button type="button" onClick={() => onGoToStep(7)} style={{ color: 'var(--accent)' }} aria-label="Editar foto" className="p-1.5">
+        <button type="button" onClick={() => onGoToStep(6)} style={{ color: 'var(--accent)' }} aria-label="Editar foto" className="p-1.5">
           <Pencil size={14} aria-hidden="true" />
         </button>
       </div>
@@ -232,18 +228,12 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
             <Pencil size={13} aria-hidden="true" />
           </button>
         </div>
-        <ReviewRow
-          label="Áreas de atuação"
-          value={step4.category_ids.length > 0 ? `${step4.category_ids.length} selecionada(s)` : null}
-          step={4}
-          onEdit={onGoToStep}
-        />
       </div>
 
       {/* Localização */}
       <div className="card p-4 mb-4">
         <SectionTitle icon={MapPin}>Localização</SectionTitle>
-        <ReviewRow label="Endereço" value={addressLine || null} step={5} onEdit={onGoToStep} />
+        <ReviewRow label="Endereço" value={addressLine || null} step={4} onEdit={onGoToStep} />
         {!step5.city && (
           <p className="text-xs mt-2" style={{ color: 'var(--error)' }}>A cidade é obrigatória para enviar o cadastro.</p>
         )}
@@ -255,7 +245,7 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
         <ReviewRow
           label="Links cadastrados"
           value={step6.links.length > 0 ? step6.links.map((l) => l.platform).join(', ') : null}
-          step={6}
+          step={5}
           onEdit={onGoToStep}
         />
       </div>
@@ -266,13 +256,13 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
         <ReviewRow
           label="Visível no perfil público"
           value={visibleItems.length > 0 ? visibleItems.join(', ') : 'apenas nome, foto, apresentação, tipologias e cidade'}
-          step={8}
+          step={7}
           onEdit={onGoToStep}
         />
         <ReviewRow
           label="Termos de uso"
           value={step8.terms_accepted ? `Aceitos (versão ${step8.terms_version})` : null}
-          step={8}
+          step={7}
           onEdit={onGoToStep}
         />
       </div>

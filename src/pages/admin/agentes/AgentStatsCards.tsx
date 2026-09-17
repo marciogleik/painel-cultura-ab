@@ -37,16 +37,16 @@ export function AgentStatsCards({ counts, isLoading, active, onSelect }: AgentSt
             className={`card p-4 flex items-center gap-3 text-left transition-all ${selected ? 'ring-2 ring-amber-500/50' : ''}`}
             aria-busy={isLoading}
           >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bg}`}>
-              <Icon size={20} className={color} aria-hidden="true" />
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${bg}`}>
+              <Icon size={24} className={color} aria-hidden="true" />
             </div>
             <div className="min-w-0">
               {isLoading ? (
-                <div className="skeleton h-7 w-10 rounded mb-1" />
+                <div className="skeleton h-8 w-12 rounded mb-1" />
               ) : (
-                <p className="text-2xl font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>{value}</p>
+                <p className="text-3xl font-bold leading-tight tracking-tight mb-0.5" style={{ color: 'var(--text-primary)' }}>{value}</p>
               )}
-              <p className="text-xs font-medium leading-tight" style={{ color: 'var(--text-muted)' }}>{label}</p>
+              <p className="text-sm font-medium leading-tight whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: 'var(--text-muted)' }} title={label}>{label}</p>
             </div>
           </button>
         )

@@ -8,7 +8,7 @@ import {
   Camera, Loader2, type LucideIcon,
 } from 'lucide-react'
 import { cn, errorMessage } from '@/lib/utils'
-import { ThemeToggle } from '@/components/ThemeToggle'
+
 import { NotificationBell } from '@/components/NotificationBell'
 import { useToast } from '@/components/ui/Toast'
 import { uploadUserAvatar } from '@/services/culturalAgentService'
@@ -224,7 +224,7 @@ export function AppLayout({ isAdmin = false }: AppLayoutProps) {
               Hub de Inovação
             </p>
           </div>
-          <ThemeToggle />
+
         </div>
         <div className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: 'var(--bg-card)' }}>
           <div className="relative group flex-shrink-0">

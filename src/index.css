@@ -27,30 +27,7 @@
     --text-inst-subtitle: #475569;
   }
 
-  .dark {
-    --bg-primary: #0a0f1e;
-    --bg-secondary: #0f172a;
-    --bg-card: #141d35;
-    --bg-card-hover: #1a2540;
-    --border: #1e2d4d;
-    --border-light: #2a3a5c;
-    --text-primary: #f0f4ff;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --accent: #f59e0b;
-    --accent-light: #fbbf24;
-    --accent-dark: #d97706;
-    --success: #10b981;
-    --error: #ef4444;
-    --warning: #f59e0b;
-    --info: #3b82f6;
 
-    /* Institutional header colors - Dark theme uses blue header */
-    --bg-inst-header: #0f2044;
-    --border-inst-header: #1e3a6e;
-    --text-inst-title: #ffffff;
-    --text-inst-subtitle: #7facd4;
-  }
 
   * {
     box-sizing: border-box;
@@ -97,9 +74,7 @@
     border-color: var(--border-light);
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
   }
-  .dark .card:hover {
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  }
+
   .card-glow:hover {
     box-shadow: 0 8px 32px rgba(245, 158, 11, 0.1), 0 0 0 1px rgba(245, 158, 11, 0.2);
     border-color: rgba(245, 158, 11, 0.3);
@@ -109,6 +84,7 @@
   .btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
     padding: 10px 20px;
     border-radius: 8px;
@@ -125,7 +101,7 @@
   }
   .btn-primary {
     background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
-    color: #0a0f1e;
+    color: #ffffff;
     font-weight: 600;
   }
   .btn-primary:hover:not(:disabled) {
@@ -189,9 +165,9 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 10px;
+    padding: 4px 12px;
     border-radius: 999px;
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     font-weight: 500;
   }
   /* Tema claro: texto escuro sobre fundo tingido (contraste AA) */
@@ -221,31 +197,6 @@
     border: 1px solid #cbd5e1;
   }
   /* Tema escuro: texto claro sobre fundo translúcido */
-  .dark .badge-amber {
-    background: rgba(245, 158, 11, 0.15);
-    color: var(--accent-light);
-    border: 1px solid rgba(245, 158, 11, 0.2);
-  }
-  .dark .badge-green {
-    background: rgba(16, 185, 129, 0.15);
-    color: #34d399;
-    border: 1px solid rgba(16, 185, 129, 0.2);
-  }
-  .dark .badge-red {
-    background: rgba(239, 68, 68, 0.15);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.2);
-  }
-  .dark .badge-blue {
-    background: rgba(59, 130, 246, 0.15);
-    color: #60a5fa;
-    border: 1px solid rgba(59, 130, 246, 0.2);
-  }
-  .dark .badge-slate {
-    background: rgba(100, 116, 139, 0.15);
-    color: #94a3b8;
-    border: 1px solid rgba(100, 116, 139, 0.2);
-  }
 
   /* Conteúdo HTML vindo do CMS (símbolos, textos institucionais) */
   .rich-text {

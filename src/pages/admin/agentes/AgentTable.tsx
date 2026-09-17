@@ -21,8 +21,8 @@ export function AgentTable({ agents, typologyPaths, onOpen }: AgentTableProps) {
           </div>
           <div className="min-w-0">
             <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">{protocolOf(a.id)}</span>
-            <p className="text-sm font-semibold leading-tight truncate mt-0.5" style={{ color: 'var(--text-primary)' }}>{a.display_name || 'Sem nome artístico'}</p>
-            {a.legal_name && <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{a.legal_name}</p>}
+            <p className="text-sm font-semibold leading-tight mt-1 whitespace-normal break-words" style={{ color: 'var(--text-primary)' }}>{a.display_name || 'Sem nome artístico'}</p>
+            {a.legal_name && <p className="text-xs whitespace-normal break-words mt-0.5" style={{ color: 'var(--text-muted)' }}>{a.legal_name}</p>}
           </div>
         </div>
       ),
@@ -37,16 +37,18 @@ export function AgentTable({ agents, typologyPaths, onOpen }: AgentTableProps) {
       ),
     },
     {
-      key: 'typologies', header: 'Tipologias',
+      key: 'typologies', header: 'Tipologias', className: 'whitespace-normal min-w-[200px]',
       render: (a) => {
         const list = a.typologies ?? []
         if (list.length === 0) return <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>Não informada</span>
         return (
-          <div className="flex flex-wrap gap-1 max-w-xs">
-            {list.slice(0, 2).map((t) => (
-              <span key={t.id} className="badge badge-amber text-[11px] truncate max-w-[14rem]" title={typologyLabel(t, typologyPaths)}>{typologyLabel(t, typologyPaths)}</span>
+          <div className="flex flex-wrap gap-1.5">
+            {list.slice(0, 3).map((t) => (
+              <span key={t.id} className="badge badge-amber text-[10px] leading-tight whitespace-normal text-left max-w-[12rem] break-words" title={typologyLabel(t, typologyPaths)}>
+                {typologyLabel(t, typologyPaths)}
+              </span>
             ))}
-            {list.length > 2 && <span className="badge badge-slate text-[10px]">+{list.length - 2}</span>}
+            {list.length > 3 && <span className="badge badge-slate text-[10px]">+{list.length - 3}</span>}
           </div>
         )
       },

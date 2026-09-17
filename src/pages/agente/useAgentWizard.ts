@@ -45,9 +45,6 @@ export interface WizardStep3 {
   draftTip3: string
 }
 
-export interface WizardStep4 {
-  category_ids: string[]
-}
 
 export type WizardStep5 = Partial<
   Pick<AgentAddress, 'cep' | 'street' | 'number' | 'complement' | 'neighborhood' | 'city' | 'state' | 'lat' | 'lng'>
@@ -83,7 +80,6 @@ export interface WizardData {
   step1: WizardStep1
   step2: WizardStep2
   step3: WizardStep3
-  step4: WizardStep4
   step5: WizardStep5
   step6: WizardStep6
   step7: WizardStep7
@@ -112,7 +108,6 @@ const INITIAL_DATA: WizardData = {
     cnpj: '',
   },
   step3: { typology_ids: [], draftTip1: '', draftTip2: '', draftTip3: '' },
-  step4: { category_ids: [] },
   step5: { city: 'Água Boa', state: 'MT' },
   step6: { links: [] },
   step7: { photo_url: null, photoFile: null, saved_photo_url: null },
@@ -134,20 +129,19 @@ export const WIZARD_STEP_LABELS: Record<number, string> = {
   1: 'Tipo de Agente',
   2: 'Identificação',
   3: 'Tipologia',
-  4: 'Áreas de Atuação',
-  5: 'Localização',
-  6: 'Redes Sociais',
-  7: 'Foto',
-  8: 'Privacidade e Termos',
-  9: 'Revisão',
+  4: 'Localização',
+  5: 'Redes Sociais',
+  6: 'Foto',
+  7: 'Privacidade e Termos',
+  8: 'Revisão',
 }
 
-export const TOTAL_STEPS = 9
+export const TOTAL_STEPS = 8
 
-export type StepKey = keyof Pick<WizardData, 'step1' | 'step2' | 'step3' | 'step4' | 'step5' | 'step6' | 'step7' | 'step8'>
+export type StepKey = keyof Pick<WizardData, 'step1' | 'step2' | 'step3' | 'step5' | 'step6' | 'step7' | 'step8'>
 
 // ============================================================
-// Persistência em sessionStorage (F5 não perde o progresso)
+// Persistência em localStorage (fechar a aba não perde o progresso)
 // ============================================================
 
 interface PersistedWizard {
@@ -159,7 +153,7 @@ const storageKey = (agentId: string) => `agent-wizard:${agentId}`
 
 function readPersisted(agentId: string): PersistedWizard | null {
   try {
-    const raw = sessionStorage.getItem(storageKey(agentId))
+    const raw = localStorage.getItem(storageKey(agentId))
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<PersistedWizard>
     if (!parsed || typeof parsed.step !== 'number' || !parsed.data) return null
@@ -175,16 +169,16 @@ function writePersisted(agentId: string, step: number, data: WizardData) {
       ...data,
       step7: { ...data.step7, photoFile: null },
     }
-    sessionStorage.setItem(storageKey(agentId), JSON.stringify({ step, data: serializable }))
+    localStorage.setItem(storageKey(agentId), JSON.stringify({ step, data: serializable }))
   } catch {
-    // sessionStorage indisponível (modo privado etc.) — segue sem persistir
+    // localStorage indisponível (modo privado etc.) — segue sem persistir
   }
 }
 
 export function clearPersistedWizard(agentId: string | null) {
   if (!agentId) return
   try {
-    sessionStorage.removeItem(storageKey(agentId))
+    localStorage.removeItem(storageKey(agentId))
   } catch {
     // ignorar
   }
@@ -222,9 +216,6 @@ export function wizardDataFromAgent(agent: CulturalAgentWithRelations): WizardDa
       draftTip1: '',
       draftTip2: '',
       draftTip3: '',
-    },
-    step4: {
-      category_ids: (agent.areas ?? []).map((a) => a.category_id),
     },
     step5: address
       ? {
@@ -343,7 +334,24 @@ export function useAgentWizard() {
       setCurrentStep(Math.min(Math.max(persisted.step, 1), TOTAL_STEPS))
     } else {
       setData(fromServer)
-      setCurrentStep(1)
+      let firstMissing = 1
+      if (agent.person_type) firstMissing = 2
+      if (fromServer.step2.display_name) firstMissing = 3
+      if (fromServer.step3.typology_ids.length > 0) firstMissing = 4
+      
+      if (fromServer.step5.city && fromServer.step5.state) {
+        if (fromServer.step8.terms_accepted) {
+          firstMissing = 8 // Revisão (tudo pronto)
+        } else if (fromServer.step7.photo_url || fromServer.step7.saved_photo_url) {
+          firstMissing = 7 // Foto preenchida, falta Privacidade
+        } else if (fromServer.step6.links.length > 0) {
+          firstMissing = 6 // Redes sociais preenchidas, falta Foto
+        } else {
+          firstMissing = 5 // Localização preenchida, ir para Redes Sociais
+        }
+      }
+      
+      setCurrentStep(firstMissing)
     }
     setErrors({})
     setReturnToReview(false)
@@ -372,7 +380,6 @@ export function useAgentWizard() {
     dados_basicos: !!data.step2.display_name,
     foto: !!data.step7.photo_url || !!data.step7.photoFile,
     tipologia: data.step3.typology_ids.length > 0,
-    areas: data.step4.category_ids.length > 0,
     endereco: !!(data.step5.city && data.step5.state),
     redes_sociais: data.step6.links.length > 0,
     apresentacao: data.step2.biography.length >= 50,

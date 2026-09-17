@@ -183,11 +183,7 @@ export function Step8PrivacidadeTermos({ data, onChange, onNext, onBack, errors,
                   interpretação de dados culturais, conforme os objetivos do Sistema Municipal de Informações e
                   Indicadores Culturais (SMIIC) e a Lei n.º 13.709/2018 (LGPD).
                 </p>
-                <p className="font-semibold mt-2" style={{ color: 'var(--text-primary)' }}>Homologação</p>
-                <p>
-                  O cadastro passa por análise da Secretaria antes de ser publicado no Mapa Cultural. A Secretaria pode
-                  devolver o cadastro para correções ou suspender perfis que descumpram estes termos.
-                </p>
+
                 <p className="font-semibold mt-2" style={{ color: 'var(--text-primary)' }}>Sanções</p>
                 <p>
                   O fornecimento de informação falsa pode causar suspensão ou cancelamento do acesso, além das sanções

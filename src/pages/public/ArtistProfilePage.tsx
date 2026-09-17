@@ -10,7 +10,7 @@ import { useToast } from '@/components/ui/Toast'
 import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
 import {
   getPublicAgentById, getAgentMembers, requestAgentMembership, respondToInvite,
-  getCurriculumUrl, getTypologyTree, flattenTypologyTree,
+  getCurriculumUrl, getTypologyTree, flattenTypologyTree, rateAgent
 } from '@/services/culturalAgentService'
 import { safeUrl, whatsappLink, formatPhone, errorMessage } from '@/lib/utils'
 import type { SocialPlatform, PublicCulturalAgent } from '@/types'
@@ -54,6 +54,10 @@ export function ArtistProfilePage() {
   const { user } = useAuth()
   const toast = useToast()
   const qc = useQueryClient()
+
+  const [inviteNotes, setInviteNotes] = useState('')
+  const [ratingHover, setRatingHover] = useState(0)
+  const [isRating, setIsRating] = useState(false)
 
   const [requestModalOpen, setRequestModalOpen] = useState(false)
   const [requestedRole, setRequestedRole] = useState('')
@@ -104,6 +108,20 @@ export function ArtistProfilePage() {
     onError: (err: unknown) => {
       toast.error(errorMessage(err, 'Erro ao enviar solicitação.'))
     },
+  })
+
+  const rateMutation = useMutation({
+    mutationFn: (rating: number) => rateAgent(id!, rating),
+    onSuccess: () => {
+      toast.success('Avaliação enviada com sucesso!')
+      refetch()
+      qc.invalidateQueries({ queryKey: ['home-featured-agents'] })
+      qc.invalidateQueries({ queryKey: ['public-agents'] })
+    },
+    onError: (err: unknown) => {
+      toast.error(errorMessage(err, 'Erro ao enviar avaliação. Você deve estar logado.'))
+    },
+    onSettled: () => setIsRating(false),
   })
 
   const respondInviteMutation = useMutation({
@@ -218,6 +236,33 @@ export function ArtistProfilePage() {
               {isCollective ? <Users className="h-3.5 w-3.5" aria-hidden="true" /> : agent.person_type === 'juridica' ? <Building2 className="h-3.5 w-3.5" aria-hidden="true" /> : <User className="h-3.5 w-3.5" aria-hidden="true" />}
               {agentKind(agent)}
             </p>
+
+            <div className="flex items-center gap-2 mb-4">
+              <div className="flex" onMouseLeave={() => setRatingHover(0)}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    disabled={isRating || !user}
+                    onMouseEnter={() => user && setRatingHover(star)}
+                    onClick={() => {
+                      if (user) {
+                        setIsRating(true)
+                        rateMutation.mutate(star)
+                      }
+                    }}
+                    className={`p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded ${user ? 'cursor-pointer hover:scale-110 transition-transform' : 'cursor-default'} ${(ratingHover || Math.round(agent.average_rating ?? 0)) >= star ? 'text-amber-500' : 'text-slate-300'}`}
+                    aria-label={`Avaliar com ${star} estrela${star > 1 ? 's' : ''}`}
+                    title={user ? `Avaliar com ${star} estrela${star > 1 ? 's' : ''}` : 'Faça login para avaliar'}
+                  >
+                    <Star className="h-5 w-5 fill-current" aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+              <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
+                {(agent.average_rating ?? 0) > 0 ? `${Number(agent.average_rating).toFixed(1)} (${agent.total_ratings ?? 0} avaliaç${(agent.total_ratings ?? 0) === 1 ? 'ão' : 'ões'})` : 'Ainda não avaliado'}
+              </span>
+            </div>
 
             {(areas.length > 0 || typologyPaths.length > 0) && (
               <div className="flex flex-wrap gap-2 mb-4">

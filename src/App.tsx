@@ -10,6 +10,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { PublicLayout } from '@/components/layout/PublicLayout'
 import { AppLayout } from '@/components/layout/AppLayout'
+import { ScrollToTop } from '@/components/layout/ScrollToTop'
 import type { UserRole } from '@/types'
 
 // A home carrega no bundle principal; o resto entra sob demanda, por rota.
@@ -85,6 +86,7 @@ export default function App() {
           <ConfirmProvider>
             <AuthProvider>
               <BrowserRouter>
+                <ScrollToTop />
                 <Suspense fallback={<FullPageSpinner />}>
                   <Routes>
                     {/* Público */}

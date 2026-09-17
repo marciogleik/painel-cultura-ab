@@ -124,7 +124,7 @@ export function HomePage() {
   } = useQuery({
     queryKey: ['home-featured-agents'],
     queryFn: async () => {
-      const res = await getPublicAgents({ pageSize: 6 })
+      const res = await getPublicAgents({ pageSize: 6, sort: 'rating' })
       return res.data.map((a) => ({
         id: a.id,
         name: a.display_name || 'Agente Cultural',

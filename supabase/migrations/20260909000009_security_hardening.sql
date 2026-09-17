@@ -577,7 +577,7 @@ BEGIN
   END IF;
 
   UPDATE public.cultural_agents
-  SET registration_status = 'enviado', submitted_at = now()
+  SET registration_status = 'aprovado', submitted_at = now(), is_public = true
   WHERE id = p_agent_id
   RETURNING * INTO v_agent;
 
@@ -586,8 +586,8 @@ BEGIN
     SELECT id FROM public.profiles WHERE is_active AND role IN ('SUPER_ADMIN', 'ADMIN_CULTURA', 'GESTOR')
   LOOP
     INSERT INTO public.agent_notifications (recipient_id, type, title, body, meta)
-    VALUES (v_admin, 'general', 'Novo cadastro para homologação',
-            format('O agente cultural "%s" enviou o cadastro para análise.', COALESCE(v_agent.display_name, 'sem nome')),
+    VALUES (v_admin, 'general', 'Novo agente cadastrado',
+            'O agente "' || COALESCE(v_agent.display_name, 'Sem nome') || '" realizou o cadastro na plataforma.',
             jsonb_build_object('agent_id', p_agent_id));
   END LOOP;
 

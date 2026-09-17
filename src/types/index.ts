@@ -317,6 +317,8 @@ export interface PublicCulturalAgent {
   is_public: boolean
   created_at: string
   updated_at: string
+  average_rating: number
+  total_ratings: number
   // Joined (embutidos pelo PostgREST)
   typologies?: AgentTypology[]
   areas?: AgentArea[]
@@ -473,7 +475,6 @@ export type AgentOnboardingStep =
   | 'dados_basicos'
   | 'foto'
   | 'tipologia'
-  | 'areas'
   | 'endereco'
   | 'redes_sociais'
   | 'apresentacao'

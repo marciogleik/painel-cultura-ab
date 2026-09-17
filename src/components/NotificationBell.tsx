@@ -152,7 +152,7 @@ export function NotificationBell() {
           id={panelId}
           role="dialog"
           aria-label="Notificações"
-          className="absolute right-0 top-10 w-80 rounded-2xl shadow-2xl z-50 overflow-hidden"
+          className="absolute right-0 lg:right-auto lg:-left-4 top-10 w-80 rounded-2xl shadow-2xl z-50 overflow-hidden"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
         >
           {/* Header */}

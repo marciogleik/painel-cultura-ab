@@ -30,7 +30,7 @@ export const AGENT_STATUS: Record<AgentRegistrationStatus, AgentStatusMeta> = {
   aprovado: {
     label: 'Aprovado',
     color: 'badge-green',
-    description: 'Cadastro homologado. O perfil pode ser publicado no Mapa Cultural.',
+    description: 'Cadastro ativo e publicado no Mapa Cultural.',
   },
   rejeitado: {
     label: 'Devolvido',

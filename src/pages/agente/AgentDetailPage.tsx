@@ -34,7 +34,6 @@ const MISSING_LABELS: Record<AgentOnboardingStep, string> = {
   dados_basicos: 'dados básicos (nome e documento)',
   foto: 'foto',
   tipologia: 'tipologia',
-  areas: 'áreas de atuação',
   endereco: 'endereço',
   redes_sociais: 'redes sociais',
   apresentacao: 'apresentação (mín. 50 caracteres)',
@@ -182,7 +181,6 @@ export function AgentDetailPage() {
   const isApproved = agent.registration_status === 'aprovado'
   const address = agent.address ?? null
   const typologies = agent.typologies ?? []
-  const areas = agent.areas ?? []
   const socialLinks = agent.social_links ?? []
   const cvName = cvOriginalName ?? fileNameFromPath(agent.curriculum_url)
 
@@ -517,26 +515,6 @@ export function AgentDetailPage() {
             {typologies.map((t) => (
               <li key={t.id} className="badge badge-slate text-xs">
                 {typologyMap.get(t.typology_id)?.path.join(' › ') ?? t.cultural_typologies?.name ?? 'Tipologia'}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* Áreas de atuação */}
-      {areas.length > 0 && (
-        <section className="card p-4 mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Tag size={14} style={{ color: 'var(--accent)' }} aria-hidden="true" />
-            <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-              Áreas de atuação
-            </h2>
-          </div>
-          <ul className="flex flex-wrap gap-1.5 list-none p-0 m-0">
-            {areas.map((a) => (
-              <li key={a.id} className="badge badge-slate text-xs">
-                {a.categories?.icon && <span aria-hidden="true">{a.categories.icon} </span>}
-                {a.categories?.name ?? 'Área'}
               </li>
             ))}
           </ul>

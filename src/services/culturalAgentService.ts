@@ -101,12 +101,13 @@ export interface AgentFilters {
   registration_status?: AgentRegistrationStatus | ''
   page?: number
   pageSize?: number
+  sort?: 'recent' | 'rating'
 }
 
 export async function getPublicAgents(
   filters: AgentFilters = {}
 ): Promise<PaginatedResponse<PublicCulturalAgent>> {
-  const { search, category_id, typology_id, person_type, collective_type, city, page = 1, pageSize = 12 } = filters
+  const { search, category_id, typology_id, person_type, collective_type, city, page = 1, pageSize = 12, sort = 'recent' } = filters
 
   // `!inner` faz o filtro na relação restringir os agentes devolvidos
   const select = `*,
@@ -125,7 +126,11 @@ export async function getPublicAgents(
   if (category_id) query = query.eq('agent_areas.category_id', category_id)
 
   const from = (page - 1) * pageSize
-  query = query.range(from, from + pageSize - 1).order('created_at', { ascending: false })
+  if (sort === 'rating') {
+    query = query.range(from, from + pageSize - 1).order('average_rating', { ascending: false }).order('created_at', { ascending: false })
+  } else {
+    query = query.range(from, from + pageSize - 1).order('created_at', { ascending: false })
+  }
 
   const { data, count, error } = await query
   if (error) throw error
@@ -137,6 +142,24 @@ export async function getPublicAgents(
     pageSize,
     totalPages: Math.ceil((count ?? 0) / pageSize),
   }
+}
+
+export async function rateAgent(agentId: string, rating: number): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user?.id) throw new Error('Não autenticado')
+
+  const { error } = await supabase
+    .from('agent_ratings')
+    .upsert({
+      agent_id: agentId,
+      evaluator_id: session.user.id,
+      rating: rating,
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: 'agent_id, evaluator_id'
+    })
+
+  if (error) throw error
 }
 
 export async function getPublicAgentById(id: string): Promise<PublicCulturalAgent | null> {
@@ -516,7 +539,6 @@ export function calculateCompletion(agent: CulturalAgentWithRelations): AgentCom
       (agent.person_type === 'juridica' ? !!agent.legal_name && !!agent.cnpj : !!agent.cpf),
     foto: !!agent.photo_url,
     tipologia: (agent.typologies?.length ?? 0) > 0,
-    areas: (agent.areas?.length ?? 0) > 0,
     endereco: !!agent.address?.city && !!agent.address?.state,
     redes_sociais: (agent.social_links?.length ?? 0) > 0,
     apresentacao: (agent.biography?.length ?? 0) >= 50,

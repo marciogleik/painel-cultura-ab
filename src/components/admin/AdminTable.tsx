@@ -36,7 +36,7 @@ export function AdminTable<T extends { id: string }>({ columns, rows, rowKey, ca
                 <th
                   key={c.key}
                   scope="col"
-                  className={cn('px-4 py-3 text-xs font-semibold uppercase tracking-wide whitespace-nowrap', ALIGN[c.align ?? 'left'], c.className)}
+                  className={cn('px-5 py-4 text-xs font-bold uppercase tracking-wider whitespace-nowrap', ALIGN[c.align ?? 'left'], c.className)}
                   style={{ color: 'var(--text-secondary)' }}
                 >
                   {c.header}
@@ -53,7 +53,11 @@ export function AdminTable<T extends { id: string }>({ columns, rows, rowKey, ca
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((c) => (
-                  <td key={c.key} className={cn('px-4 py-3 align-middle', ALIGN[c.align ?? 'left'], c.className)} style={{ color: 'var(--text-secondary)' }}>
+                  <td
+                    key={c.key}
+                    className={cn('px-5 py-4 whitespace-nowrap', ALIGN[c.align ?? 'left'], c.className)}
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
                     {c.render(row)}
                   </td>
                 ))}

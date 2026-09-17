@@ -15,7 +15,6 @@ import {
   updateCulturalAgent,
   upsertAgentAddress,
   setAgentTypologies,
-  setAgentAreas,
   setAgentSocialLinks,
   updateAgentPrivacy,
   uploadAgentPhoto,
@@ -28,7 +27,6 @@ import { WizardProgress } from './WizardProgress'
 import { Step1TipoAgente } from './Step1TipoAgente'
 import { Step2Identificacao } from './Step2Identificacao'
 import { Step3Tipologia } from './Step3Tipologia'
-import { Step4Areas } from './Step4Areas'
 import { Step5Localizacao } from './Step5Localizacao'
 import { Step6RedesSociais } from './Step6RedesSociais'
 import { Step7Foto } from './Step7Foto'
@@ -123,7 +121,7 @@ export function AgentRegisterPage() {
   }
 
   const afterSave = () => {
-    if (returnToReview) wizard.goToStep(9)
+    if (returnToReview) wizard.goToStep(8)
     else wizard.nextStep()
   }
 
@@ -177,11 +175,7 @@ export function AgentRegisterPage() {
         await setAgentTypologies(agentId, d.step3.typology_ids)
       }
 
-      if (currentStep === 4) {
-        await setAgentAreas(agentId, d.step4.category_ids)
-      }
-
-      if (currentStep === 5 && (d.step5.city || d.step5.cep || d.step5.street)) {
+      if (currentStep === 4 && (d.step5.city || d.step5.cep || d.step5.street)) {
         await upsertAgentAddress(agentId, {
           cep: onlyDigits(d.step5.cep) || null,
           street: d.step5.street?.trim() || null,
@@ -195,11 +189,11 @@ export function AgentRegisterPage() {
         })
       }
 
-      if (currentStep === 6) {
+      if (currentStep === 5) {
         await setAgentSocialLinks(agentId, d.step6.links)
       }
 
-      if (currentStep === 7) {
+      if (currentStep === 6) {
         if (d.step7.photoFile) {
           const url = await uploadAgentPhoto(agentId, d.step7.photoFile, d.step7.saved_photo_url)
           wizard.updateStep('step7', { photo_url: url, photoFile: null, saved_photo_url: url })
@@ -209,7 +203,7 @@ export function AgentRegisterPage() {
         }
       }
 
-      if (currentStep === 8) {
+      if (currentStep === 7) {
         await updateAgentPrivacy(agentId, {
           show_phone: d.step8.show_phone,
           show_email: d.step8.show_email,
@@ -261,7 +255,7 @@ export function AgentRegisterPage() {
       await submitAgent(agentId)
       wizard.clearPersisted()
       invalidateAgent(agentId)
-      toast.success('Cadastro enviado para homologação.')
+      toast.success('Cadastro concluído com sucesso.')
       return true
     } catch (err) {
       const msg = errorMessage(err, 'Não foi possível enviar o cadastro. Tente novamente.')
@@ -317,7 +311,7 @@ export function AgentRegisterPage() {
         />
 
         {/* Erro global (a etapa 9 mostra o seu próprio, junto do botão) */}
-        {errors.global && currentStep !== 9 && (
+        {errors.global && currentStep !== 8 && (
           <div
             role="alert"
             className="mb-4 px-4 py-3 rounded-lg text-sm"
@@ -364,15 +358,6 @@ export function AgentRegisterPage() {
           />
         )}
         {currentStep === 4 && (
-          <Step4Areas
-            data={data.step4}
-            onChange={(v) => wizard.updateStep('step4', v)}
-            onNext={() => saveProgress()}
-            onBack={wizard.prevStep}
-            isSaving={isSaving}
-          />
-        )}
-        {currentStep === 5 && (
           <Step5Localizacao
             data={data.step5}
             onChange={(v) => wizard.updateStep('step5', v)}
@@ -383,7 +368,7 @@ export function AgentRegisterPage() {
             isSaving={isSaving}
           />
         )}
-        {currentStep === 6 && (
+        {currentStep === 5 && (
           <Step6RedesSociais
             data={data.step6}
             onChange={(v) => wizard.updateStep('step6', v)}
@@ -392,7 +377,7 @@ export function AgentRegisterPage() {
             isSaving={isSaving}
           />
         )}
-        {currentStep === 7 && (
+        {currentStep === 6 && (
           <Step7Foto
             data={data.step7}
             onChange={(v) => wizard.updateStep('step7', v)}
@@ -401,7 +386,7 @@ export function AgentRegisterPage() {
             isSaving={isSaving}
           />
         )}
-        {currentStep === 8 && (
+        {currentStep === 7 && (
           <Step8PrivacidadeTermos
             data={data.step8}
             onChange={(v) => wizard.updateStep('step8', v)}
@@ -412,7 +397,7 @@ export function AgentRegisterPage() {
             isSaving={isSaving}
           />
         )}
-        {currentStep === 9 && (
+        {currentStep === 8 && (
           <Step9Revisao
             data={data}
             agentStatus={agentStatus}
