@@ -55,7 +55,7 @@ export function ArtistProfilePage() {
   const toast = useToast()
   const qc = useQueryClient()
 
-  const [inviteNotes, setInviteNotes] = useState('')
+  
   const [ratingHover, setRatingHover] = useState(0)
   const [isRating, setIsRating] = useState(false)
 
