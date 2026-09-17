@@ -79,7 +79,7 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
     !(data.step5.city && data.step5.state) ||
     data.step2.biography.length < 50
 
-  const canSubmit = (agentStatus === null || SUBMITTABLE_STATUSES.includes(agentStatus)) && !hasMissing
+
   const isApproved = agentStatus === 'aprovado'
 
   const handleSubmit = async () => {

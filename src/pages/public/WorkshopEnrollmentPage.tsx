@@ -18,6 +18,7 @@ interface WorkshopOption {
   schedule: string | null
   location: string | null
   category: string | null
+  vacancies: number | null
 }
 
 /** Imprime apenas a ficha (#print-area), sem esconder o restante da árvore do DOM. */
@@ -44,6 +45,7 @@ interface EnrollmentFormData {
   grade: string
   school_period: string
   age: string
+  cpf?: string
   // Dados do responsável
   guardian_name: string
   phone: string

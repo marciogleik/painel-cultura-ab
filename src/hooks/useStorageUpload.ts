@@ -109,7 +109,7 @@ export function useStorageUpload(options: UseStorageUploadOptions) {
       }
 
       // Remove o anterior (o informado pelo pai ou o último enviado nesta sessão)
-      const toRemove = lastUploaded.current ?? previousUrl
+      // unused toRemove: const toRemove = lastUploaded.current ?? previousUrl
       // A6: Removido `removeFromBucket(toRemove)` para evitar perda caso o form não seja salvo
       lastUploaded.current = result
 
