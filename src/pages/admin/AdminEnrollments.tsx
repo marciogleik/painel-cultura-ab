@@ -41,6 +41,7 @@ interface Enrollment {
   status: EnrollmentStatus
   admin_notes: string | null
   created_at: string
+  academic_year: number | null
   cultural_workshops?: { title: string } | null
 }
 
@@ -58,6 +59,7 @@ export function AdminEnrollments() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [workshopFilter, setWorkshopFilter] = useState('ALL')
+  const [yearFilter, setYearFilter] = useState(new Date().getFullYear().toString())
   const [selected, setSelected] = useState<Enrollment | null>(null)
   const [adminNotes, setAdminNotes] = useState('')
 
@@ -71,10 +73,11 @@ export function AdminEnrollments() {
   })
 
   const enrollmentsQuery = useQuery({
-    queryKey: ['workshop_enrollments', workshopFilter],
+    queryKey: ['workshop_enrollments', workshopFilter, yearFilter],
     queryFn: async () => {
       let q = supabase.from('workshop_enrollments').select('*, cultural_workshops(title)').order('created_at', { ascending: false })
       if (workshopFilter !== 'ALL') q = q.eq('workshop_id', workshopFilter)
+      if (yearFilter !== 'ALL') q = q.eq('academic_year', parseInt(yearFilter, 10))
       const { data, error } = await q
       if (error) throw error
       return (data ?? []) as Enrollment[]
@@ -154,6 +157,15 @@ export function AdminEnrollments() {
 
       <div className="flex flex-col md:flex-row gap-3 mb-4">
         <SearchInput value={search} onChange={setSearch} placeholder="Buscar por aluno, responsável ou oficina" label="Buscar fichas" className="flex-1" />
+        <div>
+          <label htmlFor="enroll-year" className="sr-only">Filtrar por ano</label>
+          <select id="enroll-year" value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="input">
+            <option value="ALL">Todos os anos</option>
+            <option value="2026">2026</option>
+            <option value="2025">2025</option>
+            <option value="2024">2024</option>
+          </select>
+        </div>
         <div>
           <label htmlFor="enroll-workshop" className="sr-only">Filtrar por oficina</label>
           <select id="enroll-workshop" value={workshopFilter} onChange={(e) => setWorkshopFilter(e.target.value)} className="input">

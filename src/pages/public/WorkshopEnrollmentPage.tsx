@@ -76,6 +76,51 @@ export function WorkshopEnrollmentPage() {
     },
   })
 
+  // Estados para busca de rematrícula
+  const [searchStudent, setSearchStudent] = useState('')
+  const [searchPhone, setSearchPhone] = useState('')
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
+
+  const handleSearch = async () => {
+    if (!searchStudent || !searchPhone) {
+      setSearchError('Preencha o nome do aluno e o telefone para buscar')
+      return
+    }
+    setIsSearching(true)
+    setSearchError('')
+    try {
+      const { data, error } = await supabase.rpc('find_my_enrollment', {
+        p_student_name: searchStudent,
+        p_phone: searchPhone
+      })
+      if (error) throw error
+      if (!data || data.length === 0) {
+        setSearchError('Matrícula anterior não encontrada. Verifique os dados ou preencha manualmente.')
+      } else {
+        const prev = data[0]
+        setValue('student_name', prev.student_name)
+        setValue('school', prev.school || '')
+        setValue('school_period', prev.school_period || '')
+        setValue('guardian_name', prev.guardian_name || '')
+        setValue('phone', prev.phone || '')
+        setValue('address', prev.address || '')
+        setValue('authorized_person', prev.authorized_person || '')
+        setValue('accompanied_by_guardian', prev.accompanied_by_guardian)
+        setAccompanied(prev.accompanied_by_guardian)
+        setValue('image_authorization', prev.image_authorization)
+        setValue('image_auth_guardian_name', prev.image_auth_guardian_name || '')
+        setValue('image_auth_guardian_cpf', prev.image_auth_guardian_cpf || '')
+        
+        toast.success('Dados recuperados com sucesso! Atualize a idade, a série e a oficina desejada.')
+      }
+    } catch (err: any) {
+      setSearchError('Erro ao buscar matrícula: ' + err.message)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
   // Carregar lista de oficinas
   const { data: workshops } = useQuery({
     queryKey: ['workshops_for_enrollment'],
@@ -238,6 +283,54 @@ export function WorkshopEnrollmentPage() {
 
       {/* Form */}
       <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-10">
+
+        {/* ── SEÇÃO DE REMATRÍCULA ── */}
+        <div className="mb-8 p-6 rounded-2xl border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <h2 className="text-lg font-bold mb-4 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+            <User size={20} style={{ color: 'var(--accent)' }} />
+            Já foi aluno no ano passado? Puxe seus dados
+          </h2>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
+            Se você fez matrícula no ano anterior, preencha os campos abaixo para buscar suas informações e agilizar o cadastro.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+                Nome Completo do Aluno
+              </label>
+              <input
+                type="text"
+                value={searchStudent}
+                onChange={(e) => setSearchStudent(e.target.value)}
+                className="input"
+                placeholder="Ex: João da Silva"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+                Telefone de Contato
+              </label>
+              <input
+                type="text"
+                value={searchPhone}
+                onChange={(e) => setSearchPhone(e.target.value)}
+                className="input"
+                placeholder="(00) 00000-0000"
+              />
+            </div>
+          </div>
+          {searchError && (
+            <p className="text-sm text-red-500 mb-4">{searchError}</p>
+          )}
+          <button
+            type="button"
+            onClick={handleSearch}
+            disabled={isSearching}
+            className="btn btn-primary w-full sm:w-auto"
+          >
+            {isSearching ? 'Buscando...' : 'Buscar Meus Dados'}
+          </button>
+        </div>
         {mutation.isError && (
           <div role="alert" className="flex items-center gap-3 p-4 mb-6 rounded-xl border border-red-500/30 bg-red-500/10 text-red-600">
             <AlertCircle size={18} aria-hidden="true" />
