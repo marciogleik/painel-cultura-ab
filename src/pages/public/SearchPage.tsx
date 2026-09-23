@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams, Link } from 'react-router-dom'
 import { Users, SlidersHorizontal, MapPin, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { getPublicAgents, getTypologyTree, flattenTypologyTree } from '@/services/culturalAgentService'
+import { getPublicAgents } from '@/services/culturalAgentService'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { EmptyState, ErrorState } from '@/components/ui/EmptyState'
@@ -25,8 +25,6 @@ export function SearchPage() {
 
   const search = searchParams.get('q') ?? ''
   const categoryId = searchParams.get('category') ?? ''
-  const typologyId = searchParams.get('typology') ?? ''
-  const city = searchParams.get('city') ?? ''
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1)
 
   function setParam(key: string, value: string) {
@@ -55,55 +53,41 @@ export function SearchPage() {
     staleTime: 5 * 60 * 1000,
   })
 
-  const { data: typologyMap } = useQuery({
-    queryKey: ['typology-tree', 'agent'],
-    queryFn: async () => flattenTypologyTree(await getTypologyTree('agent')),
-    staleTime: 5 * 60 * 1000,
-  })
-
-  const typologyOptions = useMemo(() => {
-    if (!typologyMap) return []
-    return Array.from(typologyMap.entries()).map(([id, { path }]) => ({ id, label: path.join(' › ') }))
-  }, [typologyMap])
-
-  const { data: cities = [] } = useQuery({
-    queryKey: ['public-agent-cities'],
+  const { data: agentNames = [] } = useQuery({
+    queryKey: ['public-agent-names'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('public_cultural_agents')
-        .select('city')
-        .not('city', 'is', null)
-        .order('city')
+        .select('display_name')
+        .not('display_name', 'is', null)
+        .order('display_name')
       if (error) throw error
-      const rows = (data ?? []) as { city: string | null }[]
-      return Array.from(new Set(rows.map((r) => r.city?.trim()).filter((c): c is string => !!c)))
+      const rows = (data ?? []) as { display_name: string | null }[]
+      return Array.from(new Set(rows.map((r) => r.display_name?.trim()).filter((c): c is string => !!c)))
     },
     staleTime: 5 * 60 * 1000,
   })
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['public-agents', { search, categoryId, typologyId, city, page }],
+    queryKey: ['public-agents', { search, categoryId, page }],
     queryFn: () =>
       getPublicAgents({
         search: search || undefined,
         category_id: categoryId || undefined,
-        typology_id: typologyId || undefined,
-        city: city || undefined,
         page,
         pageSize: PAGE_SIZE,
       }),
     placeholderData: (prev) => prev,
   })
 
-  const hasFilters = Boolean(search || categoryId || typologyId || city)
+  const hasFilters = Boolean(search || categoryId)
   const activeCategory = categories.find((c) => c.id === categoryId)
-  const activeTypology = typologyId ? typologyMap?.get(typologyId) : undefined
   const totalPages = Math.max(1, data?.totalPages ?? 1)
 
   function firstTypologyLabel(agent: PublicCulturalAgent): string | null {
     const t = agent.typologies?.[0]
     if (!t) return null
-    return typologyMap?.get(t.typology_id)?.path.join(' › ') ?? t.cultural_typologies?.name ?? null
+    return t.cultural_typologies?.name ?? null
   }
 
   return (
@@ -129,7 +113,13 @@ export function SearchPage() {
               onChange={(v) => setParam('q', v)}
               label="Buscar agentes culturais"
               placeholder="Buscar por nome, área ou atividade..."
+              list="agent-names"
             />
+            <datalist id="agent-names">
+              {agentNames.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
           </div>
           <button
             type="button"
@@ -153,7 +143,7 @@ export function SearchPage() {
 
         {/* Painel de filtros */}
         {filtersOpen && (
-          <div id="agent-filters" className="card p-5 mb-6 grid grid-cols-1 sm:grid-cols-3 gap-4 animate-slide-up">
+          <div id="agent-filters" className="card p-5 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-slide-up">
             <div>
               <label htmlFor="filter-category" className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
                 Área de atuação
@@ -169,40 +159,6 @@ export function SearchPage() {
                   <option key={c.id} value={c.id}>
                     {c.icon ? `${c.icon} ` : ''}{c.name}
                   </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="filter-typology" className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
-                Tipologia cultural
-              </label>
-              <select
-                id="filter-typology"
-                className="input"
-                value={typologyId}
-                onChange={(e) => setParam('typology', e.target.value)}
-              >
-                <option value="">Todas as tipologias</option>
-                {typologyOptions.map((t) => (
-                  <option key={t.id} value={t.id}>{t.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="filter-city" className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
-                Cidade
-              </label>
-              <select
-                id="filter-city"
-                className="input"
-                value={city}
-                onChange={(e) => setParam('city', e.target.value)}
-              >
-                <option value="">Todas as cidades</option>
-                {cities.map((c) => (
-                  <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
@@ -225,22 +181,6 @@ export function SearchPage() {
               <span className="badge badge-amber gap-1">
                 {activeCategory.name}
                 <button type="button" onClick={() => setParam('category', '')} aria-label="Remover filtro de área" className="ml-1 hover:opacity-70">
-                  <X size={12} aria-hidden="true" />
-                </button>
-              </span>
-            )}
-            {activeTypology && (
-              <span className="badge badge-amber gap-1">
-                {activeTypology.path.join(' › ')}
-                <button type="button" onClick={() => setParam('typology', '')} aria-label="Remover filtro de tipologia" className="ml-1 hover:opacity-70">
-                  <X size={12} aria-hidden="true" />
-                </button>
-              </span>
-            )}
-            {city && (
-              <span className="badge badge-amber gap-1">
-                {city}
-                <button type="button" onClick={() => setParam('city', '')} aria-label="Remover filtro de cidade" className="ml-1 hover:opacity-70">
                   <X size={12} aria-hidden="true" />
                 </button>
               </span>

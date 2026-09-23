@@ -10,10 +10,11 @@ interface SearchInputProps {
   debounce?: number
   className?: string
   autoFocus?: boolean
+  list?: string
 }
 
 /** Campo de busca acessível (label invisível) com debounce e botão de limpar. */
-export function SearchInput({ value, onChange, placeholder = 'Buscar...', label = 'Buscar', debounce = 300, className = '', autoFocus }: SearchInputProps) {
+export function SearchInput({ value, onChange, placeholder = 'Buscar...', label = 'Buscar', debounce = 300, className = '', autoFocus, list }: SearchInputProps) {
   const [local, setLocal] = useState(value)
   const id = useId()
 
@@ -33,6 +34,7 @@ export function SearchInput({ value, onChange, placeholder = 'Buscar...', label 
       <input
         id={id}
         type="search"
+        list={list}
         className="input pl-9 pr-9"
         placeholder={placeholder}
         value={local}
