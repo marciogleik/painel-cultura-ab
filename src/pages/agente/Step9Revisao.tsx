@@ -72,12 +72,7 @@ export function Step9Revisao({ data, agentStatus, onBack, onGoToStep, onSubmit, 
   })
   const flat = useMemo(() => flattenTypologyTree(tree), [tree])
 
-  const hasMissing = 
-    !data.step2.display_name || 
-    !(data.step7.photo_url || data.step7.photoFile) ||
-    data.step3.typology_ids.length === 0 ||
-    !(data.step5.city && data.step5.state) ||
-    data.step2.biography.length < 50
+  const hasMissing = !data.step2.display_name
 
 
   const isApproved = agentStatus === 'aprovado'
