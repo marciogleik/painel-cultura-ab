@@ -62,10 +62,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const loadProfile = useCallback(async (id: string) => {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle()
-    if (error) throw error
-    return (data as Profile) ?? null
+  const loadProfile = useCallback(async (id: string, retries = 3) => {
+    for (let i = 0; i < retries; i++) {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle()
+      if (error) {
+        if (error.message && error.message.includes('JWT issued at future') && i < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1500))
+          continue
+        }
+        throw error
+      }
+      return (data as Profile) ?? null
+    }
+    return null
   }, [])
 
   // Perfil: carregado sempre que o usuário muda; isLoading só cai a false depois disso.
@@ -94,7 +103,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((err: Error) => {
         if (cancelled) return
-        setProfileError(err.message || 'Não foi possível carregar seu perfil.')
+        let msg = err.message || 'Não foi possível carregar seu perfil.'
+        if (msg.includes('JWT issued at future')) {
+          msg = 'Ocorreu uma pequena falta de sincronia no relógio do servidor. Por favor, recarregue a página ou aguarde alguns segundos e tente novamente.'
+        }
+        setProfileError(msg)
         setProfile(null)
       })
       .finally(() => {
