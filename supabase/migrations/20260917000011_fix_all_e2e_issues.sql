@@ -116,7 +116,6 @@ RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.user_id IS NOT NULL AND NEW.user_id = (select auth.uid()) THEN
     NEW.invite_status = 'accepted';
-    NEW.accepted_at = now();
   END IF;
   RETURN NEW;
 END;
