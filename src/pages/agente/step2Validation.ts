@@ -6,6 +6,7 @@ export const GENDER_OPTIONS = [
   { value: 'feminino', label: 'Feminino' },
   { value: 'masculino', label: 'Masculino' },
   { value: 'nao_binario', label: 'Não-binário' },
+  { value: 'lgbtqia', label: 'LGBTQIA+' },
   { value: 'outro', label: 'Outro' },
 ]
 

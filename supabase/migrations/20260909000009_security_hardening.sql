@@ -581,7 +581,7 @@ BEGIN
   END IF;
 
   UPDATE public.cultural_agents
-  SET registration_status = 'aprovado', submitted_at = now(), is_public = true
+  SET registration_status = 'enviado', submitted_at = now()
   WHERE id = p_agent_id
   RETURNING * INTO v_agent;
 

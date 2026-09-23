@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Info } from 'lucide-react'
 import { LoadingButton } from '@/components/ui/ConfirmDialog'
 import { formatCPF, formatCNPJ, formatPhone, onlyDigits, todayISO } from '@/lib/utils'
@@ -26,6 +27,10 @@ export function Step2Identificacao({
 }: Step2Props) {
   const isCollective = step1.collective_type === 'coletivo'
   const isPJ = step1.person_type === 'juridica'
+  const [forceCustomGender, setForceCustomGender] = useState(false)
+  
+  const isCustomGender = !GENDER_OPTIONS.some(o => o.value === data.gender) && data.gender !== ''
+  const showCustomGender = forceCustomGender || isCustomGender || data.gender === 'outro'
 
   const handleNext = () => {
     const errs = validateStep2(data, isPJ, isCollective)
@@ -259,16 +264,36 @@ export function Step2Identificacao({
             {!isCollective && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Gênero" optional>
-                  <select
-                    name="gender"
-                    className="input"
-                    value={data.gender}
-                    onChange={(e) => onChange({ gender: e.target.value })}
-                  >
-                    {GENDER_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
+                  <div className="flex flex-col gap-2">
+                    <select
+                      name="gender"
+                      className="input"
+                      value={showCustomGender ? 'outro' : data.gender}
+                      onChange={(e) => {
+                        if (e.target.value === 'outro') {
+                          setForceCustomGender(true)
+                          onChange({ gender: '' })
+                        } else {
+                          setForceCustomGender(false)
+                          onChange({ gender: e.target.value })
+                        }
+                      }}
+                    >
+                      {GENDER_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    {showCustomGender && (
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="Especifique seu gênero"
+                        value={isCustomGender ? data.gender : ''}
+                        onChange={(e) => onChange({ gender: e.target.value })}
+                        autoFocus
+                      />
+                    )}
+                  </div>
                 </Field>
 
                 <Field

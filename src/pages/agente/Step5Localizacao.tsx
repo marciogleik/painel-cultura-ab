@@ -255,7 +255,7 @@ export function Step5Localizacao({ data, onChange, onNext, onBack, errors, setEr
             <button
               type="button"
               onClick={locateOnMap}
-              disabled={geoLoading || !data.city}
+              disabled={geoLoading}
               className="btn btn-secondary text-xs flex-shrink-0"
             >
               {geoLoading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Crosshair size={14} aria-hidden="true" />}
