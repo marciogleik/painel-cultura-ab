@@ -1,0 +1,1 @@
+ALTER TABLE workshop_enrollments ADD COLUMN academic_year INT DEFAULT EXTRACT(YEAR FROM CURRENT_DATE);
